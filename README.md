@@ -19,28 +19,25 @@ This repo has two parts:
 
 If you already have UE4SS working for other Palworld mods, skip to step 2.
 
-1. Download the latest UE4SS release from
-   [UE4SS-RE/RE-UE4SS on GitHub](https://github.com/UE4SS-RE/RE-UE4SS/releases)
-   (grab the `.zip`, not the source code).
-2. Find your Palworld install folder, then go into
-   `Pal\Binaries\Win64\` inside it (for a normal Steam install this is
-   usually something like
-   `SteamLibrary\steamapps\common\Palworld\Pal\Binaries\Win64\`).
-3. Extract the UE4SS zip **directly into that `Win64` folder** -- not
-   into a subfolder. When you're done, `Win64` should directly contain
-   things like `dwmapi.dll`, `UE4SS-settings.ini`, and a `Mods` folder.
-4. Launch Palworld once. If UE4SS is working, you'll see a black console
-   window pop up alongside the game (if you don't, check
-   `UE4SS-settings.ini` for `GuiConsoleVisible = 1`).
+1. Subscribe to
+   [UE4SS Experimental (Palworld) on the Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3625223587)
+   and let Steam download/install it -- this is the recommended way to
+   get UE4SS for Palworld, and the Workshop page has its own
+   troubleshooting/FAQ if something doesn't load.
+2. Launch Palworld once. If UE4SS is working, you'll see a black console
+   window pop up alongside the game.
 
 ### 2. Install the Palversation mod
 
-1. Grab `mod/` from this repo (or the zip from a Nexus download).
+Palversation is distributed on Nexus Mods, not via the Steam Workshop
+(the Workshop entry above is only for UE4SS itself, the loader).
+
+1. Download the mod from Nexus (or grab `mod/` from this repo).
 2. Copy the `Palversation` folder (the one containing
-   `Scripts\main.lua`) into your UE4SS `Mods` folder. For a normal Steam
-   install this usually looks like
-   `...\Palworld\Mods\NativeMods\UE4SS\Mods\Palversation\` (your exact
-   path may differ depending on where Steam is installed).
+   `Scripts\main.lua`) into your UE4SS `Mods` folder. Since UE4SS was
+   installed via the Steam Workshop, that folder is at:
+   `steamapps\common\Palworld\Mods\NativeMods\UE4SS\Mods\Palversation\`
+   (per the Workshop page's own FAQ on installing Nexus mods).
 3. In that same `Mods` folder, open `mods.txt` in a text editor and add
    a line for it:
    ```
