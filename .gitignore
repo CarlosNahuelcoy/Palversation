@@ -1,0 +1,27 @@
+# Entornos virtuales
+venv/
+env/
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+*.spec
+
+# Archivos generados en tiempo de ejecución (datos de usuario, no de código)
+pal_history.json
+pal_prompts.json
+pal_names.json
+pal_memory.json
+config.txt
+
+# Ejecutables compilados
+*.exe
+
+# Sistema
+.DS_Store
+Thumbs.db
