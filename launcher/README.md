@@ -1,8 +1,9 @@
 # Palversation Launcher
 
 External launcher that bridges the Palworld mod (Palversation) and an LLM
-provider (Player2 for now). Runs as a single program: settings + the live
-connection, in one window.
+provider -- Player2, OpenAI, Gemini, OpenRouter, or a Custom
+OpenAI-compatible endpoint (e.g. local Ollama). Runs as a single program:
+settings + the live connection, in one window.
 
 ## Building the standalone .exe
 

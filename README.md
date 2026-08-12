@@ -1,8 +1,9 @@
 # Palversation
 
 A Palworld mod + launcher that lets your Pals actually talk back, using an
-LLM (Player2 by default, or your own OpenAI/Gemini/OpenRouter/local Ollama
-key).
+LLM. Pick a provider in the launcher: Player2 (one-click account connect,
+no key to copy), OpenAI, Gemini, OpenRouter, or a Custom OpenAI-compatible
+endpoint (e.g. a local Ollama server).
 
 This repo has two parts:
 
@@ -51,8 +52,18 @@ Palversation is distributed on Nexus Mods, not via the Steam Workshop
    needed).
 2. In the app's **Folders** tab, point "Mod Folder" at the
    `...\Palversation\` folder from step 2.2 above.
-3. In the **General** tab, connect your Player2 account (or paste
-   another provider's API key). Save.
+3. In the **General** tab, pick a provider from the dropdown:
+   - **Player2** -- no key to copy. Click **Connect Account**; it
+     either grabs a key from the local Player2 app instantly, or opens
+     your browser for a one-time approval.
+   - **OpenAI / Gemini / OpenRouter** -- paste your own API key from
+     that provider into the API key field, and set the model if you
+     want something other than the default.
+   - **Custom (OpenAI-compatible)** -- for a local server (e.g.
+     Ollama) or any other OpenAI-compatible endpoint. Set the Base URL
+     and model; the API key field can stay empty if the server doesn't
+     need one.
+   Click **Test Connection** to confirm it works, then **Save**.
 4. In-game: deploy a Pal and type `!pal <message>` in chat -- if it
    responds, everything's installed and connected correctly.
 
