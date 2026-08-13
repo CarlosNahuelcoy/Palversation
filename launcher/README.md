@@ -8,7 +8,13 @@ settings + the live connection, in one window.
 ## Building the standalone .exe
 
 Run `build_exe.bat` from an activated venv with `requirements.txt`
-already installed (it installs PyInstaller itself, then builds). Find
+already installed (it installs PyInstaller itself, then builds). In
+PowerShell (the default terminal on modern Windows) you need the `.\`
+prefix for a script in the current folder:
+```
+.\build_exe.bat
+```
+In `cmd.exe` either `build_exe.bat` or `.\build_exe.bat` works. Find
 `Palversation.exe` inside the `dist` folder afterward -- it's a single
 file, no Python install needed on the end user's machine.
 
