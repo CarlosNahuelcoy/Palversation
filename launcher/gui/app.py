@@ -10,6 +10,9 @@ straightforward.
 
 import sys
 import math
+import queue
+import threading
+import webbrowser
 import tkinter as tk
 from tkinter import ttk, messagebox
 from pathlib import Path
@@ -31,6 +34,7 @@ from core.history_store import load_history
 from core.pal_names import load_names
 from core.pal_memory import load_memories, save_memories
 from core.paths import get_launcher_dir, get_bundled_dir
+from core.update_check import CURRENT_VERSION, is_newer_version, fetch_latest_release
 from gui import theme
 from gui.watcher_controller import WatcherController
 
@@ -77,6 +81,7 @@ class PalversationApp(tk.Tk):
         self._try_start_watcher(silent=True)
         self._poll_log_queue()
         self._poll_watcher_status()
+        self._start_update_check()
 
     # ------------------------------------------------------------------
     # Path helpers -- shared by every tab, all derived from config_data.
@@ -120,6 +125,16 @@ class PalversationApp(tk.Tk):
         self.title_label = ttk.Label(header, text="PALVERSATION", style="Title.TLabel")
         self.title_label.pack(side="left", anchor="w")
 
+        # Small, muted version tag next to the title -- not meant to draw
+        # attention, just a quick reference for the player (and for us,
+        # when someone reports a bug) to see at a glance which build
+        # they're running, without digging through files or Task Manager.
+        self.version_label = tk.Label(
+            header, text=f"v{CURRENT_VERSION}", bg=theme.BG, fg=theme.TEXT_MUTED,
+            font=(theme.FONT_FAMILY, 9),
+        )
+        self.version_label.pack(side="left", anchor="s", padx=(6, 0), pady=(0, 3))
+
         self._maybe_load_logo()
 
         status_area = ttk.Frame(header)
@@ -137,6 +152,15 @@ class PalversationApp(tk.Tk):
             padx=14, pady=6, command=self._toggle_watcher,
         )
         self.start_stop_button.pack(side="left")
+
+        # Hidden until an update check finds something newer than
+        # CURRENT_VERSION (see _show_update_notice). Sits to the left of
+        # the status area, since pack(side="right") stacks new widgets
+        # inward from the edge already claimed by status_area.
+        self.update_label = tk.Label(
+            header, text="", bg=theme.BG, fg=theme.ACCENT,
+            font=theme.FONT_BODY, cursor="hand2",
+        )
 
         separator = tk.Frame(self, bg=theme.BORDER, height=1)
         separator.pack(fill="x", padx=24, pady=(10, 10))
@@ -330,6 +354,41 @@ class PalversationApp(tk.Tk):
     def _on_close(self):
         self.watcher.stop()
         self.destroy()
+
+    # ------------------------------------------------------------------
+    # Update check -- see core/update_check.py for the actual GitHub
+    # call. This never downloads or replaces anything by itself: it just
+    # notices a newer release exists and shows a clickable link to it.
+    # The network call is blocking, so it runs in a background thread;
+    # the result comes back through a queue and only touches the GUI
+    # from the main thread via self.after, same pattern as the watcher's
+    # own log_queue above.
+    # ------------------------------------------------------------------
+
+    def _start_update_check(self):
+        self._update_check_queue = queue.Queue()
+        threading.Thread(target=self._update_check_worker, daemon=True).start()
+        self.after(500, self._poll_update_check)
+
+    def _update_check_worker(self):
+        result = fetch_latest_release()  # None on any failure -- see its own docstring
+        self._update_check_queue.put(result)
+
+    def _poll_update_check(self):
+        try:
+            result = self._update_check_queue.get_nowait()
+        except queue.Empty:
+            self.after(500, self._poll_update_check)
+            return
+        # One-shot check: whether or not we found something, we're done
+        # polling here -- no need to reschedule again after this.
+        if result and is_newer_version(result["version"], CURRENT_VERSION):
+            self._show_update_notice(result["version"], result["url"])
+
+    def _show_update_notice(self, latest_version: str, release_url: str):
+        self.update_label.configure(text=f"Update available: {latest_version}")
+        self.update_label.bind("<Button-1>", lambda event: webbrowser.open(release_url))
+        self.update_label.pack(side="right", padx=(0, 14))
 
     # ------------------------------------------------------------------
     # Saving -- every tab calls this after updating self.config_data /

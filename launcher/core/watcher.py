@@ -61,13 +61,27 @@ def run_watch_loop(
     # present, we also export a simple text lookup into the IPC folder so
     # the Lua mod can show the real species name in the game chat too,
     # without needing to parse JSON on that side.
-    resolved_pal_data_path = resolve_pal_data_path(pal_data_path)
-    pal_data = load_pal_data(resolved_pal_data_path)
-    if pal_data:
-        export_species_names_lookup(pal_data, watch_folder / "pal_species_names.txt")
-        log(f"[Palversation Launcher] Loaded species data for {len(pal_data)} Pals from {resolved_pal_data_path}")
-    else:
-        log(f"[Palversation Launcher] No species data found at {pal_data_path} (optional -- names/lore will just use what the game gives us).")
+    #
+    # This whole block is wrapped in try/except on purpose: it's optional
+    # enrichment, not something the mod strictly needs to function. If
+    # pal_data.json is missing, malformed, or pal_species_names.txt can't
+    # be written (e.g. someone marked it read-only to stop it from being
+    # regenerated), we log a warning and keep going with raw species IDs
+    # instead of crashing the whole watch loop before it even starts.
+    pal_data = {}
+    try:
+        resolved_pal_data_path = resolve_pal_data_path(pal_data_path)
+        pal_data = load_pal_data(resolved_pal_data_path)
+        if pal_data:
+            try:
+                export_species_names_lookup(pal_data, watch_folder / "pal_species_names.txt")
+            except Exception as e:
+                log(f"[Palversation Launcher] Could not write pal_species_names.txt, skipping this run (species names in-game will fall back to raw IDs): {e}")
+            log(f"[Palversation Launcher] Loaded species data for {len(pal_data)} Pals from {resolved_pal_data_path}")
+        else:
+            log(f"[Palversation Launcher] No species data found at {pal_data_path} (optional -- names/lore will just use what the game gives us).")
+    except Exception as e:
+        log(f"[Palversation Launcher] Could not load species data, continuing without it: {e}")
 
     # Discard any leftover request/response from a previous session that
     # crashed or was closed abruptly. request.txt/response.txt should only
