@@ -18,7 +18,7 @@ import urllib.request
 # Bump this by hand with every release you publish, so it matches the
 # GitHub tag (e.g. CURRENT_VERSION = "1.1.0" for a "v1.1.0" tag). This is
 # the ONLY place that needs updating for the check itself to work.
-CURRENT_VERSION = "1.0.1"
+CURRENT_VERSION = "1.0.2"
 
 RELEASES_API_URL = "https://api.github.com/repos/CarlosNahuelcoy/Palversation/releases/latest"
 REQUEST_TIMEOUT_SECONDS = 5

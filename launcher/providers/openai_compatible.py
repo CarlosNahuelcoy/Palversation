@@ -101,12 +101,22 @@ class OpenAICompatibleProvider(LLMProvider):
         # unexpected response shape crash with a bare KeyError.
         try:
             choice = data["choices"][0]
-            msg = choice["message"]
         except (KeyError, IndexError) as e:
             raise RuntimeError(f"Unexpected response shape (missing {e}): {data}") from e
 
-        text = msg.get("content")
+        msg = choice.get("message")
+        if isinstance(msg, dict) and msg.get("content"):
+            text = msg.get("content")
+        else:
+            # Some OpenAI-compatible providers (confirmed with NovelAI's
+            # /oa/v1/chat/completions endpoint) return a completions-style
+            # shape even for a non-streaming chat request: no 'message'
+            # object at all, just the text directly under choice['text'].
+            # Falling back to that instead of failing keeps this working
+            # for those providers without breaking the standard shape.
+            text = choice.get("text")
+
         if not text:
-            raise RuntimeError(f"Response has no usable 'content' (message was: {msg})")
+            raise RuntimeError(f"Response has no usable text content (choice was: {choice})")
 
         return strip_emojis(text)

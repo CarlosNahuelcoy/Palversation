@@ -252,7 +252,15 @@ class GeneralTab(ttk.Frame):
                 provider.get_response("Say OK if you can read this.", event_type="chat")
                 self.after(0, lambda: self._on_test_result(True, ""))
             except Exception as e:
-                self.after(0, lambda: self._on_test_result(False, str(e)))
+                # Some exceptions can end up with str(e) == "None" (when
+                # something along the way raises Exception(None) instead
+                # of a real message), which showed up as a useless
+                # "Failed: None" in the UI. Including the exception's own
+                # class name alongside the message means there's always
+                # something diagnosable on screen, even in that case.
+                detail = str(e) or repr(e)
+                message = f"{type(e).__name__}: {detail}"
+                self.after(0, lambda: self._on_test_result(False, message))
 
         threading.Thread(target=run_test, daemon=True).start()
 
