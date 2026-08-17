@@ -28,6 +28,7 @@ from providers.base import LLMProvider
 from providers.player2 import Player2Provider
 from providers.player2_auth import start_connect as player2_start_connect
 from providers.openai_compatible import OpenAICompatibleProvider
+from providers.novelai import NovelAIProvider
 
 
 @dataclass
@@ -37,35 +38,36 @@ class ProviderSpec:
     default_base_url: str
     api_key_label: str
     api_key_placeholder: str
-    # False means this provider has its own connect flow (see
-    # auth_handler below) instead of a plain paste-your-key field.
     key_is_pasted: bool
     factory: Callable[..., LLMProvider]
-    # Only used when key_is_pasted is False. Shape:
-    # auth_handler(on_key, on_status, on_error) -> starts a background
-    # connect flow; calls on_key(key) once it succeeds.
     auth_handler: Optional[Callable] = None
-    # Default model to pre-fill the Model field with. Can be empty (e.g.
-    # "custom", where there's no sensible default) -- whether the field
-    # shows at all is controlled by needs_model below, not by this.
     default_model: str = ""
     model_placeholder: str = ""
-    # Whether the GUI should show a Model field for this provider at all.
     needs_model: bool = False
-    # Whether a non-empty API key is required to use this provider. False
-    # for things like a local Ollama server, which usually needs none.
     requires_api_key: bool = True
 
 
 def _make_player2(api_key: str, base_url: str, system_prompt: str, model_name: str = "") -> LLMProvider:
-    # Player2 chooses a model automatically -- model_name is accepted for
-    # a uniform factory signature but intentionally unused here.
     return Player2Provider(api_key=api_key, base_url=base_url, system_prompt=system_prompt)
 
 
 def _make_openai_compatible(api_key: str, base_url: str, system_prompt: str, model_name: str = "") -> LLMProvider:
     return OpenAICompatibleProvider(
         api_key=api_key, base_url=base_url, system_prompt=system_prompt, model_name=model_name
+    )
+
+
+def _make_novelai(
+    api_key: str,
+    base_url: str,
+    system_prompt: str,
+    model_name: str = "",
+) -> LLMProvider:
+    return NovelAIProvider(
+        api_key=api_key,
+        base_url=base_url,
+        system_prompt=system_prompt,
+        model_name=model_name or "glm-4-6",
     )
 
 
@@ -115,6 +117,19 @@ PROVIDERS: Dict[str, ProviderSpec] = {
         default_model="openai/gpt-4o-mini",
         model_placeholder="openai/gpt-4o-mini",
         needs_model=True,
+    ),
+    "novelai": ProviderSpec(
+        provider_id="novelai",
+        display_name="NovelAI",
+        default_base_url="https://image.novelai.net/oa/v1/chat/completions",
+        api_key_label="NovelAI Persistent API Token",
+        api_key_placeholder="Paste your NovelAI Persistent API Token",
+        key_is_pasted=True,
+        factory=_make_novelai,
+        default_model="glm-4-6",
+        model_placeholder="glm-4-6",
+        needs_model=True,
+        requires_api_key=True,
     ),
     "custom": ProviderSpec(
         provider_id="custom",

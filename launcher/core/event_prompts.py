@@ -8,6 +8,8 @@ any external documentation.
 
 import random
 
+from core.pal_memory import build_memory_hint
+
 _EVENT_DESCRIPTIONS = {
     "deploy": "Your trainer just summoned you out of your sphere. Greet them.",
     "recall": "Your trainer just put you back in your sphere. Say goodbye.",
@@ -186,6 +188,52 @@ def build_friendship_hint(friendship_csv: str) -> str:
         f"{point}). {tier} Don't state the numbers out loud, just embody "
         f"the closeness."
     )
+
+
+def build_system_prompt(
+    base_prompt: str,
+    pal_name: str = "",
+    pal_element: str = "",
+    species_hint: str = "",
+    per_pal_prompt: str = "",
+    pal_passives: str = "",
+    pal_friendship: str = "",
+    memory_hint: str = "",
+) -> str:
+    """Assembles the full system prompt text from every provider's own
+    base prompt plus the same set of hints (name, element, species lore,
+    personality, trust, memory). This was previously copy-pasted
+    identically across every provider's get_response() -- Player2,
+    OpenAICompatible, and NovelAI all built it the exact same way, byte
+    for byte. Pulling it out here means a future change (a new hint, a
+    tweak to how one is worded) only needs to happen once.
+
+    This function ONLY returns the assembled text. Deliberately not
+    returning a ready-made 'messages' list or touching anything about
+    headers/payload shape/streaming: those genuinely differ per provider
+    and should stay that way. A provider that doesn't build its request
+    around a single system-role string (e.g. a future native Anthropic
+    integration, which uses a separate top-level 'system' field instead
+    of a system-role message) can still call this for the text and place
+    it wherever its own API expects it."""
+    system_prompt = base_prompt
+
+    if pal_name:
+        system_prompt += f" Your name is {pal_name}."
+    if pal_element and pal_element.lower() != "none":
+        system_prompt += f" You are a {pal_element}-type Pal."
+    if species_hint:
+        system_prompt += species_hint
+    if per_pal_prompt:
+        system_prompt += f" {per_pal_prompt}"
+    elif pal_passives:
+        system_prompt += build_passive_hint(pal_passives)
+    if pal_friendship:
+        system_prompt += build_friendship_hint(pal_friendship)
+    if memory_hint:
+        system_prompt += build_memory_hint(memory_hint)
+
+    return system_prompt
 
 
 def build_personality_generation_message(pal_name: str, pal_element: str) -> str:

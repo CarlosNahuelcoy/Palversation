@@ -16,8 +16,7 @@ from typing import List, Dict, Optional
 
 from .base import LLMProvider
 from core.text_clean import strip_emojis
-from core.event_prompts import build_user_message, build_passive_hint, build_friendship_hint
-from core.pal_memory import build_memory_hint
+from core.event_prompts import build_user_message, build_system_prompt
 
 
 class OpenAICompatibleProvider(LLMProvider):
@@ -50,21 +49,16 @@ class OpenAICompatibleProvider(LLMProvider):
         memory_hint: str = "",
         time_gap_prefix: str = "",
     ) -> str:
-        system_prompt = self.system_prompt
-        if pal_name:
-            system_prompt += f" Your name is {pal_name}."
-        if pal_element and pal_element.lower() != "none":
-            system_prompt += f" You are a {pal_element}-type Pal."
-        if species_hint:
-            system_prompt += species_hint
-        if per_pal_prompt:
-            system_prompt += f" {per_pal_prompt}"
-        elif pal_passives:
-            system_prompt += build_passive_hint(pal_passives)
-        if pal_friendship:
-            system_prompt += build_friendship_hint(pal_friendship)
-        if memory_hint:
-            system_prompt += build_memory_hint(memory_hint)
+        system_prompt = build_system_prompt(
+            self.system_prompt,
+            pal_name=pal_name,
+            pal_element=pal_element,
+            species_hint=species_hint,
+            per_pal_prompt=per_pal_prompt,
+            pal_passives=pal_passives,
+            pal_friendship=pal_friendship,
+            memory_hint=memory_hint,
+        )
 
         user_message = build_user_message(event_type, message, time_gap_prefix)
 
