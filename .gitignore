@@ -25,3 +25,6 @@ config.txt
 # Sistema
 .DS_Store
 Thumbs.db
+
+# Carpeta temporal generada por setup_local_bootloader.bat
+pyinstaller-src/
