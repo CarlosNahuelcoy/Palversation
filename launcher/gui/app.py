@@ -9,7 +9,9 @@ straightforward.
 """
 
 import sys
+import os
 import math
+import time
 import queue
 import threading
 import webbrowser
@@ -35,6 +37,8 @@ from core.pal_names import load_names
 from core.pal_memory import load_memories, save_memories
 from core.paths import get_launcher_dir, get_bundled_dir
 from core.update_check import CURRENT_VERSION, is_newer_version, fetch_latest_release
+from core.install_check import check_mod_folder, run_full_check, CheckStatus
+from core.launcher_runtime import get_watch_folder, ConfigError
 from gui import theme
 from gui.watcher_controller import WatcherController
 
@@ -152,6 +156,31 @@ class PalversationApp(tk.Tk):
             padx=14, pady=6, command=self._toggle_watcher,
         )
         self.start_stop_button.pack(side="left")
+
+        # Lighter-weight action, sits right after Start/Stop -- runs the
+        # static install checks (mod folder + UE4SS) on demand and shows
+        # a plain-language summary, so a player who thinks "it's not
+        # working" has something to try before writing in for support.
+        self.verify_button = tk.Button(
+            status_area, text="Verify Installation", relief="flat", bd=0, cursor="hand2",
+            bg=theme.PANEL_BG_ALT, fg=theme.TEXT, font=theme.FONT_BODY,
+            activebackground=theme.PANEL_BG, activeforeground=theme.TEXT,
+            padx=10, pady=6, command=self._verify_installation,
+        )
+        self.verify_button.pack(side="left", padx=(8, 0))
+
+        # Heavier check than Verify Installation: actually round-trips a
+        # fake request through the real running watcher and a real
+        # provider call, using an empty pal_key so nothing gets saved to
+        # any real Pal's history/prompts/memory. Confirms the whole
+        # launcher-side pipeline works, not just that files/folders exist.
+        self.test_flow_button = tk.Button(
+            status_area, text="Test Full Flow", relief="flat", bd=0, cursor="hand2",
+            bg=theme.PANEL_BG_ALT, fg=theme.TEXT, font=theme.FONT_BODY,
+            activebackground=theme.PANEL_BG, activeforeground=theme.TEXT,
+            padx=10, pady=6, command=self._test_full_flow,
+        )
+        self.test_flow_button.pack(side="left", padx=(8, 0))
 
         # Hidden until an update check finds something newer than
         # CURRENT_VERSION (see _show_update_notice). Sits to the left of
@@ -309,8 +338,8 @@ class PalversationApp(tk.Tk):
     # ------------------------------------------------------------------
 
     def _try_start_watcher(self, silent: bool = False):
-        mod_folder = self.config_data.get("mod_folder", "").strip()
-        if not mod_folder or not Path(mod_folder).is_dir():
+        mod_folder_str = self.config_data.get("mod_folder", "").strip()
+        if not mod_folder_str:
             message = (
                 "The mod folder isn't set yet (or the folder doesn't exist).\n\n"
                 "Go to the Folders tab and point it at your Palversation mod "
@@ -322,6 +351,32 @@ class PalversationApp(tk.Tk):
                 messagebox.showwarning("Palversation - Mod folder missing", message)
             return message
 
+        # Auto-correct the single most common setup mistake (pointing at
+        # Scripts\ instead of its parent) before even trying to start --
+        # this way a misconfigured folder self-heals the moment the
+        # player picks the wrong one, instead of just silently failing.
+        check_result, corrected_folder = check_mod_folder(Path(mod_folder_str))
+        if corrected_folder is None:
+            message = (
+                f"{check_result.message}\n\n"
+                "Go to the Folders tab and point it at your Palversation mod "
+                "installation -- the folder that contains Scripts\\main.lua."
+            )
+            if not silent:
+                messagebox.showwarning("Palversation - Mod folder missing", message)
+            return message
+
+        if str(corrected_folder) != mod_folder_str:
+            self.config_data["mod_folder"] = str(corrected_folder)
+            save_launcher_config(self.config_data)
+            # If the Folders tab caches the displayed path in its own
+            # widget state, let it know the value changed underneath it.
+            # Safe no-op if that tab doesn't expose this method.
+            folders_tab = self._tabs.get("folders")
+            refresh = getattr(folders_tab, "refresh_from_config", None)
+            if callable(refresh):
+                refresh()
+
         error = self.watcher.start()
         if error and not silent:
             messagebox.showwarning("Palversation", f"Could not start: {error}")
@@ -332,6 +387,153 @@ class PalversationApp(tk.Tk):
             self.watcher.stop()
         else:
             self._try_start_watcher(silent=False)
+
+    def _verify_installation(self):
+        # On-demand static check: mod folder + UE4SS presence. Doesn't
+        # touch the provider or the watcher -- that's a heavier,
+        # separate end-to-end test.
+        mod_folder_str = self.config_data.get("mod_folder", "").strip()
+        mod_folder = Path(mod_folder_str) if mod_folder_str else None
+        results = run_full_check(mod_folder)
+
+        lines = []
+        all_ok = True
+        for label, result in results:
+            if result.status == CheckStatus.OK:
+                tag = "[OK]"
+            elif result.status == CheckStatus.MISSING:
+                tag = "[MISSING]"
+                all_ok = False
+            else:
+                tag = "[?]"
+            lines.append(f"{tag} {label}\n{result.message}")
+
+        summary = "\n\n".join(lines)
+        if all_ok:
+            messagebox.showinfo("Palversation - Installation check", summary)
+        else:
+            messagebox.showwarning("Palversation - Installation check", summary)
+
+    def _test_full_flow(self):
+        # This test needs the watcher actually running -- it writes a
+        # fake request into the same folder the watcher is polling, so
+        # if it's stopped, try to start it first (this reuses the same
+        # warning dialogs _try_start_watcher already has for a bad
+        # config, no need to duplicate that here).
+        if not self.watcher.is_running():
+            error = self._try_start_watcher(silent=False)
+            if error or not self.watcher.is_running():
+                return
+
+        config = self.config_data
+        try:
+            watch_folder = get_watch_folder(config)
+        except ConfigError as e:
+            messagebox.showwarning("Palversation - Test", f"Could not resolve the watch folder: {e}")
+            return
+
+        self.test_flow_button.configure(state="disabled", text="Testing...")
+        self._test_flow_queue = queue.Queue()
+        threading.Thread(
+            target=self._test_full_flow_worker,
+            args=(watch_folder, config["request_filename"], config["response_filename"]),
+            daemon=True,
+        ).start()
+        self.after(300, self._poll_test_flow)
+
+    def _test_full_flow_worker(self, watch_folder: Path, request_filename: str, response_filename: str):
+        request_path = watch_folder / request_filename
+        response_path = watch_folder / response_filename
+
+        # Clear out any stale response left over from a previous run --
+        # otherwise an old leftover file would look like an instant fake
+        # success.
+        try:
+            response_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+        # Same 7-line protocol the Lua mod writes (see core/io_files.py).
+        # pal_key (line 3) is deliberately left empty: with no pal_key,
+        # the watcher never saves anything to history/prompts/names/
+        # memory, so this test can't pollute a real Pal's data no matter
+        # how many times it's run.
+        raw_text = "\n".join([
+            "Palversation Connectivity Test",
+            "None",
+            "",
+            "",
+            "",
+            "chat",
+            "This is an automated connectivity test. Reply with a short, one-sentence confirmation.",
+        ])
+
+        try:
+            tmp_path = request_path.with_suffix(request_path.suffix + ".tmp")
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(raw_text)
+            os.replace(tmp_path, request_path)
+        except OSError as e:
+            self._test_flow_queue.put(("error", f"Couldn't write the test request file: {e}"))
+            return
+
+        timeout_seconds = 25.0
+        waited = 0.0
+        poll_step = 0.3
+        while waited < timeout_seconds:
+            if response_path.exists():
+                try:
+                    text = response_path.read_text(encoding="utf-8").strip()
+                except OSError as e:
+                    self._test_flow_queue.put(("error", f"Response file appeared but couldn't be read: {e}"))
+                    return
+                try:
+                    response_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                self._test_flow_queue.put(("ok", text))
+                return
+            time.sleep(poll_step)
+            waited += poll_step
+
+        # Timed out -- clean up our own request so it doesn't sit there
+        # and get processed late, confusing a later real test.
+        try:
+            request_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        self._test_flow_queue.put(("timeout", None))
+
+    def _poll_test_flow(self):
+        try:
+            kind, payload = self._test_flow_queue.get_nowait()
+        except queue.Empty:
+            self.after(300, self._poll_test_flow)
+            return
+
+        self.test_flow_button.configure(state="normal", text="Test Full Flow")
+
+        if kind == "ok":
+            messagebox.showinfo(
+                "Palversation - Test successful",
+                "The full launcher pipeline works: request written, the "
+                "provider replied, response written back.\n\n"
+                f"Provider replied:\n\"{payload}\"\n\n"
+                "Note: this only tests the launcher's side. It doesn't "
+                "confirm UE4SS/Lua inside the game itself, that part is "
+                "covered by Verify Installation.",
+            )
+        elif kind == "timeout":
+            messagebox.showwarning(
+                "Palversation - No response",
+                "No response after 25 seconds.\n\n"
+                "This means the launcher itself never completed the round "
+                "trip. Check that your provider is configured and reachable "
+                "(try Test Connection in the General tab), and that "
+                "Folders -> Mod Folder points at the right place.",
+            )
+        else:
+            messagebox.showwarning("Palversation - Test failed", payload)
 
     def _poll_watcher_status(self):
         running = self.watcher.is_running()

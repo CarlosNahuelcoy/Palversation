@@ -22,9 +22,16 @@ class DirectoriesTab(ttk.Frame):
         ttk.Label(self, text="Mod Folder", style="Section.TLabel").grid(
             row=0, column=0, sticky="w", **pad
         )
-        ttk.Label(self, text="(contains Scripts/main.lua -- required)", style="Muted.TLabel").grid(
-            row=1, column=0, sticky="w"
-        )
+        ttk.Label(
+            self,
+            text=(
+                "The Palversation folder itself, inside your UE4SS Mods "
+                "folder (...\\UE4SS\\Mods\\Palversation) -- not the Scripts "
+                "subfolder inside it. If you point here at Scripts by "
+                "mistake, it's corrected automatically."
+            ),
+            style="Muted.TLabel", justify="left", wraplength=520,
+        ).grid(row=1, column=0, sticky="w")
         self.mod_folder_var = tk.StringVar(value=app.config_data.get("mod_folder", ""))
         self._make_path_row(row=0, rowspan=2, var=self.mod_folder_var, browse_cmd=self._browse_mod_folder)
 
@@ -90,6 +97,17 @@ class DirectoriesTab(ttk.Frame):
         folder = filedialog.askdirectory(title="Select (or create) the shared IPC folder")
         if folder:
             self.ipc_folder_var.set(folder)
+
+    def refresh_from_config(self):
+        """
+        Called by the app (see app._try_start_watcher) when mod_folder
+        gets auto-corrected in the background -- e.g. the player had
+        pointed at the Scripts subfolder, and it silently got fixed to
+        its parent. Without this, the Entry would keep showing the old
+        (wrong) path until the player happened to leave and come back to
+        this tab, which looks like the fix didn't actually happen.
+        """
+        self.mod_folder_var.set(self.app.config_data.get("mod_folder", ""))
 
     def save(self):
         mod_folder = self.mod_folder_var.get().strip()
