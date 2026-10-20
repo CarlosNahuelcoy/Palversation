@@ -24,6 +24,7 @@ class LLMProvider(ABC):
         image_base64: Optional[str] = None,
         memory_hint: str = "",
         time_gap_prefix: str = "",
+        context_hint: str = "",
     ) -> str:
         """
         Receives the message/content, the active Pal's name and element,

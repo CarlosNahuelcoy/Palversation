@@ -50,23 +50,26 @@
     Line 1: Pal name
     Line 2: Pal element
     Line 3: Pal key (stable per-individual: CharacterID#InstanceId)
-    Line 4: Pal passive skill IDs -- DISABLED, always empty (see
-            GetPalPassiveIds's own comment: confirmed UE4SS use-after-free
-            bug on TArray return values caused a real game crash)
+    Line 4: "right now" context since 0.15.0, e.g.
+            "ctx:night=1;hour=22;level=23;hp=45" (see BuildContext), or
+            empty. It used to carry passive skill IDs, disabled after a
+            confirmed UE4SS use-after-free bug on TArray return values
+            caused a real game crash (see GetPalPassiveIds).
     Line 5: Pal friendship, "rank,point" (confirmed real GetFriendshipRank()/
             GetFriendshipPoint() -- simple scalar returns, not affected by
             the TArray bug above), or empty if unavailable
-    Line 6: event type (chat, deploy, recall, hunger, cold, heat,
-            ride_start, ride_end, combat, idle, gift_check, vision_check)
+    Line 6: event type (chat, deploy, recall, revive, faint, hunger, cold,
+            heat, ride_start, ride_end, combat, idle, gift_check,
+            vision_check, level_up, trust_up)
     Line 7 onward: content (player's message if event_type is "chat",
-            empty or extra detail otherwise)
+            "old,new" for level_up/trust_up, empty or extra detail otherwise)
 ================================================================================
 ]]
 
 local UEHelpers = require("UEHelpers")
 
 local MOD_NAME = "Palversation"
-local VERSION  = "0.14.0"
+local VERSION  = "0.15.0"
 local TAG = "[" .. MOD_NAME .. " v" .. VERSION .. "]"
 
 -- ============================================================================
@@ -153,6 +156,9 @@ local function LoadConfig()
         enable_combat_comments = "true",
         enable_idle_comments = "true",
         enable_gift_system = "true",
+        enable_trust_comments = "true",
+        enable_level_comments = "true",
+        enable_faint_comments = "true",
     }
     ReadKeyValueFile(CONFIG_PATH, values)
     return values
@@ -173,6 +179,7 @@ local PREFIX, GIFT_PREFIX, VISION_PREFIX
 local HUNGER_THRESHOLD
 local ENABLE_DEPLOY_RECALL, ENABLE_HUNGER, ENABLE_TEMPERATURE, ENABLE_RIDE
 local ENABLE_COMBAT, ENABLE_IDLE, ENABLE_GIFTS
+local ENABLE_TRUST, ENABLE_LEVEL, ENABLE_FAINT
 local RESPONSE_TIMEOUT_SECONDS
 local IDLE_MIN_SECONDS, IDLE_MAX_SECONDS
 local AMBIENT_GIFT_MIN_SECONDS, AMBIENT_GIFT_MAX_SECONDS, AMBIENT_GIFT_CHANCE
@@ -195,6 +202,9 @@ local function ApplySettings()
     ENABLE_COMBAT        = ToBool(config.enable_combat_comments, true)
     ENABLE_IDLE          = ToBool(config.enable_idle_comments, true)
     ENABLE_GIFTS         = ToBool(config.enable_gift_system, true)
+    ENABLE_TRUST         = ToBool(config.enable_trust_comments, true)
+    ENABLE_LEVEL         = ToBool(config.enable_level_comments, true)
+    ENABLE_FAINT         = ToBool(config.enable_faint_comments, true)
 
     RESPONSE_TIMEOUT_SECONDS = tonumber(config.response_timeout_seconds) or 30
     IDLE_MIN_SECONDS = tonumber(config.idle_min_seconds) or 300
@@ -573,6 +583,99 @@ local function GetPalHungerRatio(handle)
 end
 
 -- ============================================================================
+-- MORE PAL / WORLD STATE (all scalar reads, verified in the UE4SS CXX
+-- header dump; same safe pattern as GetFriendshipRank -- no TArray/FString
+-- return values, which is what crashed the game with GetPassiveSkillList)
+-- ============================================================================
+
+local function GetIndividualParameter(handle)
+    if not handle then return nil end
+    local indParam
+    pcall(function() indParam = handle:TryGetIndividualParameter() end)
+    if not indParam or not indParam:IsValid() then return nil end
+    return indParam
+end
+
+-- UPalIndividualCharacterParameter: int32 GetLevel()
+local function GetPalLevel(handle)
+    local indParam = GetIndividualParameter(handle)
+    if not indParam then return nil end
+    local level
+    pcall(function() level = tonumber(indParam:GetLevel()) end)
+    if level and level > 0 then return level end
+    return nil
+end
+
+-- UPalIndividualCharacterParameter: bool IsDead() -- true while fainted.
+local function IsPalDead(handle)
+    local indParam = GetIndividualParameter(handle)
+    if not indParam then return false end
+    local dead = false
+    pcall(function() dead = (indParam:IsDead() == true) end)
+    return dead
+end
+
+-- UPalCharacterParameterComponent: FFixedPoint64 GetHP() / GetMaxHP().
+-- Both come back in the same fixed-point unit (a struct with one int64
+-- 'Value'), so their ratio is the real health fraction.
+local function FixedPointValue(fp)
+    if fp == nil then return nil end
+    local v
+    pcall(function() v = tonumber(fp.Value) end)
+    if v == nil then v = tonumber(fp) end
+    return v
+end
+
+local function GetPalHpRatio(handle)
+    local actor = GetPalActor(handle)
+    if not actor then return nil end
+    local comp
+    pcall(function() comp = actor:GetCharacterParameterComponent() end)
+    if not comp or not comp:IsValid() then return nil end
+    local cur, max
+    pcall(function() cur = FixedPointValue(comp:GetHP()) end)
+    pcall(function() max = FixedPointValue(comp:GetMaxHP()) end)
+    if not cur or not max or max <= 0 then return nil end
+    local ratio = cur / max
+    if ratio < 0 then ratio = 0 elseif ratio > 1 then ratio = 1 end
+    return ratio
+end
+
+-- UPalUtility: bool IsNight(WorldContextObject), and
+-- GetTimeManager(WorldContextObject):GetCurrentPalWorldTime_Hour().
+local function GetWorldTime()
+    local cdo = GetPalUtilityCDO()
+    local world = GetWorld()
+    if not cdo or not world then return nil, nil end
+    local night, hour
+    pcall(function() night = (cdo:IsNight(world) == true) end)
+    pcall(function()
+        local tm = cdo:GetTimeManager(world)
+        if tm and tm:IsValid() then hour = tonumber(tm:GetCurrentPalWorldTime_Hour()) end
+    end)
+    return night, hour
+end
+
+-- "Right now" context sent with every request (line 4 of the protocol,
+-- formerly the always-empty passives line): "ctx:night=1;hour=22;level=23;hp=45".
+-- Launchers older than 1.2 just ignore it.
+local function BuildContext()
+    local parts = {}
+    local night, hour = GetWorldTime()
+    if night ~= nil then parts[#parts + 1] = "night=" .. (night and "1" or "0") end
+    if hour then parts[#parts + 1] = "hour=" .. hour end
+    local handle = GetActivePalHandle()
+    if handle then
+        local level = GetPalLevel(handle)
+        if level then parts[#parts + 1] = "level=" .. level end
+        local hp = GetPalHpRatio(handle)
+        if hp then parts[#parts + 1] = "hp=" .. math.floor(hp * 100 + 0.5) end
+    end
+    if #parts == 0 then return "" end
+    return "ctx:" .. table.concat(parts, ";")
+end
+
+-- ============================================================================
 -- SHARED EVENT TRIGGER: builds and writes the request for the launcher.
 -- ============================================================================
 
@@ -597,27 +700,110 @@ local function ShowLauncherHint(reason)
     end)
 end
 
-local function TriggerEvent(eventType, palName, palElement, palKey, palPassives, palFriendship, content)
-    if _waitingForResponse then
-        print(TAG .. " Still waiting for a previous response, ignoring event '" .. eventType .. "'.")
-        return
+-- Minimum seconds between two spontaneous comments of the same kind, so a
+-- long fight or quickly swapping Pals doesn't turn into constant chatter.
+-- Events not listed here (player messages, level/trust ups) never wait.
+local EVENT_COOLDOWN_SECONDS = {
+    combat = 120,
+    deploy = 15,
+    recall = 15,
+    revive = 15,
+    faint = 30,
+    hunger = 300,
+    cold = 240,
+    heat = 240,
+    ride_start = 90,
+    ride_end = 90,
+}
+-- ...and between any two low-priority spontaneous comments, of any kind.
+local LOW_PRIORITY_EVENTS = { combat = true, hunger = true, cold = true, heat = true, ride_start = true, ride_end = true, idle = true }
+local LOW_PRIORITY_GAP_SECONDS = 20
+-- Moments worth waiting for if the Pal is busy answering something else
+-- (spontaneous comments are just skipped instead).
+local ALWAYS_DELIVER_EVENTS = { level_up = true, trust_up = true, faint = true, revive = true }
+
+local _lastEventAt = {}
+local _lastLowPriorityAt = nil
+
+-- A message the player typed while their Pal was still answering
+-- something else. Kept (latest wins) and sent as soon as the current
+-- answer arrives, instead of being silently dropped.
+local _queuedRequest = nil
+
+local function IsPlayerInitiated(eventType, content)
+    if eventType == "chat" or eventType == "vision_check" then return true end
+    return eventType == "gift_check" and content:sub(1, 10) == "requested:"
+end
+
+local function WriteRequest(request)
+    if WriteEntireFile(REQUEST_PATH, request.body) then
+        _waitingForResponse = true
+        _requestStartedAt = os.clock()
+        _pendingPalName = request.palName
+        print(TAG .. " Event '" .. request.eventType .. "' (" .. request.palName .. ") written to " .. REQUEST_PATH)
+        return true
     end
+    ShowLauncherHint("Could not reach the launcher (" .. DATA_DIR .. " is missing).")
+    return false
+end
+
+-- Called from the main loop once the previous answer arrived (or timed out).
+local function FlushQueuedRequest()
+    if _waitingForResponse or not _queuedRequest then return end
+    local request = _queuedRequest
+    _queuedRequest = nil
+    WriteRequest(request)
+end
+
+-- palPassives is kept in the signature for the existing callers, but line 4
+-- of the request now carries the "right now" context (see BuildContext).
+local function TriggerEvent(eventType, palName, palElement, palKey, palPassives, palFriendship, content)
     if not palName then palName = "Pal" end
     if not palElement then palElement = "None" end
     if not palKey then palKey = "unknown#" end
-    if not palPassives then palPassives = "" end
     if not palFriendship then palFriendship = "" end
     if not content then content = "" end
 
-    local body = palName .. "\n" .. palElement .. "\n" .. palKey .. "\n" .. palPassives .. "\n" .. palFriendship .. "\n" .. eventType .. "\n" .. content
-    local written = WriteEntireFile(REQUEST_PATH, body)
-    if written then
-        _waitingForResponse = true
-        _requestStartedAt = os.clock()
-        _pendingPalName = palName
-        print(TAG .. " Event '" .. eventType .. "' (" .. palName .. "/" .. palElement .. ") written to " .. REQUEST_PATH)
-    else
-        ShowLauncherHint("Could not reach the launcher (" .. DATA_DIR .. " is missing).")
+    local playerInitiated = IsPlayerInitiated(eventType, content)
+    local now = os.clock()
+
+    if not playerInitiated then
+        if _waitingForResponse and not ALWAYS_DELIVER_EVENTS[eventType] then
+            print(TAG .. " Still waiting for a previous response, skipping spontaneous event '" .. eventType .. "'.")
+            return
+        end
+        local cooldown = EVENT_COOLDOWN_SECONDS[eventType]
+        if cooldown and _lastEventAt[eventType] and (now - _lastEventAt[eventType]) < cooldown then
+            return
+        end
+        if LOW_PRIORITY_EVENTS[eventType] and _lastLowPriorityAt and (now - _lastLowPriorityAt) < LOW_PRIORITY_GAP_SECONDS then
+            return
+        end
+    end
+
+    local context = ""
+    pcall(function() context = BuildContext() end)
+
+    local request = {
+        eventType = eventType,
+        palName = palName,
+        playerInitiated = playerInitiated,
+        body = palName .. "\n" .. palElement .. "\n" .. palKey .. "\n" .. context .. "\n" .. palFriendship .. "\n" .. eventType .. "\n" .. content,
+    }
+
+    if _waitingForResponse then
+        -- Something the player typed always wins the single queue slot.
+        if playerInitiated or not (_queuedRequest and _queuedRequest.playerInitiated) then
+            _queuedRequest = request
+            print(TAG .. " Your Pal is still answering, '" .. eventType .. "' will be sent right after.")
+        end
+        if not playerInitiated then _lastEventAt[eventType] = now end
+        return
+    end
+
+    if WriteRequest(request) and not playerInitiated then
+        _lastEventAt[eventType] = now
+        if LOW_PRIORITY_EVENTS[eventType] then _lastLowPriorityAt = now end
     end
 end
 
@@ -725,34 +911,134 @@ end
 -- every other Check* function already does.
 -- ============================================================================
 
-local _wasDeployed = false
-local _lastPalName = nil
-local _lastPalElement = nil
-local _lastPalKey = nil
-local _lastPalPassives = nil
-local _lastPalFriendship = nil
+-- Also tells fainting apart from a normal recall (a fainted Pal used to
+-- say goodbye as if you'd put it away), notices when a fainted Pal comes
+-- back, and swallows the recall when you just swap one Pal for another.
+
+-- Seconds a recall waits before being said, in case another Pal comes out
+-- right away (a swap): then only the newcomer's greeting is sent.
+local RECALL_GRACE_SECONDS = 2.5
+-- Health fraction at or below which a Pal that vanished is treated as
+-- fainted, for the case where IsDead() never got to read true first.
+local FAINT_HP_RATIO = 0.02
+
+local _lastPal = nil            -- name/element/key/friendship of the deployed Pal
+local _lastPalHp = nil
+local _faintedKeys = {}         -- Pals that fainted and haven't been back out yet
+local _pendingRecall = nil      -- { pal = ..., at = os.clock() }
+
+local function SnapshotPal(handle)
+    return {
+        name = GetPalName(handle),
+        element = GetPalElement(handle),
+        key = GetPalKey(handle),
+        friendship = GetPalFriendship(handle),
+    }
+end
+
+local function TriggerPalEvent(eventType, pal, content)
+    TriggerEvent(eventType, pal.name, pal.element, pal.key, "", pal.friendship, content or "")
+end
 
 local function CheckDeployRecall()
-    if not ENABLE_DEPLOY_RECALL then return end
-
     local handle = GetActivePalHandle()
-    local isDeployed = (handle ~= nil)
+    local now = os.clock()
 
-    if isDeployed then
-        _lastPalName = GetPalName(handle)
-        _lastPalElement = GetPalElement(handle)
-        _lastPalKey = GetPalKey(handle)
-        _lastPalPassives = GetPalPassiveIds(handle)
-        _lastPalFriendship = GetPalFriendship(handle)
+    if handle then
+        local pal = SnapshotPal(handle)
+        local isNewPal = (_lastPal == nil) or (_lastPal.key ~= pal.key)
+
+        if isNewPal then
+            -- A different Pal came out: cancel the previous one's pending
+            -- goodbye if it was a quick swap.
+            _pendingRecall = nil
+            if _faintedKeys[pal.key] then
+                _faintedKeys[pal.key] = nil
+                if ENABLE_FAINT then TriggerPalEvent("revive", pal) end
+            elseif ENABLE_DEPLOY_RECALL then
+                TriggerPalEvent("deploy", pal)
+            end
+        end
+
+        -- Fainted while still out (IsDead() turns true before it vanishes).
+        if IsPalDead(handle) and not _faintedKeys[pal.key] then
+            _faintedKeys[pal.key] = true
+            if ENABLE_FAINT then TriggerPalEvent("faint", pal) end
+        end
+
+        _lastPal = pal
+        _lastPalHp = GetPalHpRatio(handle)
+        return
     end
 
-    if isDeployed and not _wasDeployed then
-        TriggerEvent("deploy", _lastPalName, _lastPalElement, _lastPalKey, _lastPalPassives, _lastPalFriendship, "")
-    elseif not isDeployed and _wasDeployed then
-        TriggerEvent("recall", _lastPalName, _lastPalElement, _lastPalKey, _lastPalPassives, _lastPalFriendship, "")
+    -- No Pal out right now.
+    if _lastPal then
+        local pal = _lastPal
+        _lastPal = nil
+        if _faintedKeys[pal.key] then
+            -- Already reacted to the faint; no goodbye on top of it.
+        elseif _lastPalHp and _lastPalHp <= FAINT_HP_RATIO then
+            _faintedKeys[pal.key] = true
+            if ENABLE_FAINT then TriggerPalEvent("faint", pal) end
+        else
+            _pendingRecall = { pal = pal, at = now }
+        end
+        _lastPalHp = nil
     end
 
-    _wasDeployed = isDeployed
+    if _pendingRecall and (now - _pendingRecall.at) >= RECALL_GRACE_SECONDS then
+        local pal = _pendingRecall.pal
+        _pendingRecall = nil
+        if ENABLE_DEPLOY_RECALL then TriggerPalEvent("recall", pal) end
+    end
+end
+
+-- ============================================================================
+-- TRUST RANK / LEVEL UPS: compared against the values seen when this Pal
+-- came out, so only progress made while it's with you is celebrated (not
+-- a level gained at the base days ago).
+-- ============================================================================
+
+local _progressKey = nil
+local _baselineRank = nil
+local _baselineLevel = nil
+
+local function CheckProgress()
+    local handle = GetActivePalHandle()
+    if not handle then _progressKey = nil; return end
+
+    local key = GetPalKey(handle)
+    local friendship = GetPalFriendship(handle)
+    local rank = tonumber((friendship or ""):match("^(%-?%d+)"))
+    local level = GetPalLevel(handle)
+
+    if key ~= _progressKey then
+        _progressKey = key
+        _baselineRank = rank
+        _baselineLevel = level
+        return
+    end
+
+    if level and _baselineLevel and level > _baselineLevel then
+        local from = _baselineLevel
+        _baselineLevel = level
+        if ENABLE_LEVEL then
+            TriggerEvent("level_up", GetPalName(handle), GetPalElement(handle), key, "", friendship, from .. "," .. level)
+        end
+        return  -- one celebration per tick
+    elseif level then
+        _baselineLevel = level
+    end
+
+    if rank and _baselineRank and rank > _baselineRank then
+        local from = _baselineRank
+        _baselineRank = rank
+        if ENABLE_TRUST then
+            TriggerEvent("trust_up", GetPalName(handle), GetPalElement(handle), key, "", friendship, from .. "," .. rank)
+        end
+    elseif rank then
+        _baselineRank = rank
+    end
 end
 
 -- ============================================================================
@@ -780,8 +1066,42 @@ end
 -- TEMPERATURE (best-effort, see note above: no clean global getter)
 -- ============================================================================
 
+-- The PLAYER's temperature component: FindFirstOf() used to grab whichever
+-- one the engine listed first, which could belong to any creature nearby.
+-- The state is read from the component's own TemperatureInfo field
+-- (verified in the CXX header dump: UPalBodyTemperatureComponent has
+-- FPalTemperatureInfo TemperatureInfo, with CurrentBodyState 0 Default /
+-- 1 Cold / 2 Heat), the same direct field read used for ElementType1.
+local TEMP_COMPONENT_SEARCH_INTERVAL = 10
+
 local _tempComp = nil
+local _nextTempSearchAt = 0
 local _lastTempState = nil
+
+local function SameObject(a, b)
+    local ok, same = pcall(function() return a:GetAddress() == b:GetAddress() end)
+    return ok and same
+end
+
+local function FindPlayerTemperatureComponent()
+    local pc = GetPlayerController()
+    if not pc then return nil end
+    local pawn
+    pcall(function() pawn = pc.Pawn end)
+    if not pawn or not pawn:IsValid() then return nil end
+
+    local comps
+    pcall(function() comps = FindAllOf("PalBodyTemperatureComponent") end)
+    if not comps then return nil end
+    for _, comp in ipairs(comps) do
+        local owner
+        pcall(function() owner = comp:GetOwner() end)
+        if owner and owner:IsValid() and SameObject(owner, pawn) then
+            return comp
+        end
+    end
+    return nil
+end
 
 local function GetBodyTempState()
     if _tempComp ~= nil then
@@ -790,30 +1110,17 @@ local function GetBodyTempState()
         if not ok then _tempComp = nil end
     end
     if _tempComp == nil then
-        pcall(function() _tempComp = FindFirstOf("PalBodyTemperatureComponent") end)
-    end
-    if not _tempComp then return nil end
-
-    -- UNCONFIRMED attempt: the real signature is
-    -- GetTemperatureInfo(FPalTemperatureInfo& OutInfo), an output-by-
-    -- reference struct parameter, not a return value like we assumed
-    -- before. Passing an empty table is a common UE4SS pattern for this
-    -- kind of parameter, but it's not verified to work for this specific
-    -- struct -- the debug log below will tell us quickly if it doesn't.
-    local outInfo = {}
-    local ok, err = pcall(function()
-        _tempComp:GetTemperatureInfo(outInfo)
-    end)
-    if not ok then
-        print(TAG .. " [temp debug] GetTemperatureInfo errored: " .. tostring(err))
-        return nil
+        -- Searching every component is not free; don't do it every tick.
+        local now = os.clock()
+        if now < _nextTempSearchAt then return nil end
+        _nextTempSearchAt = now + TEMP_COMPONENT_SEARCH_INTERVAL
+        _tempComp = FindPlayerTemperatureComponent()
+        if not _tempComp then return nil end
+        print(TAG .. " Found the player's temperature component.")
     end
 
     local state
-    pcall(function() state = tonumber(outInfo.CurrentBodyState) end)
-    if state == nil then
-        print(TAG .. " [temp debug] Call succeeded but CurrentBodyState was not readable from the output table.")
-    end
+    pcall(function() state = tonumber(_tempComp.TemperatureInfo.CurrentBodyState) end)
     return state
 end
 
@@ -967,6 +1274,7 @@ local function RegisterMainLoop()
 
         ExecuteInGameThread(function()
             CheckDeployRecall()
+            CheckProgress()
             CheckHunger()
             CheckTemperature()
             CheckRiding()
@@ -1011,6 +1319,9 @@ local function RegisterMainLoop()
                 end)
             end
         end
+
+        -- Something the player typed while the previous answer was pending.
+        FlushQueuedRequest()
     end)
 end
 

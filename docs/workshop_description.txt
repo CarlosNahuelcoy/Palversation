@@ -30,12 +30,14 @@ Then deploy a Pal and type [b]!pal hello[/b] in the chat. Keep the launcher open
 [*][b]!palgift[/b]: your Pal may give you a gift.
 [*][b]!palook[/b]: your Pal describes what it sees around it.
 [/list]
-Your Pals also comment on their own: when deployed or recalled, hungry, cold or hot, riding, in combat, and every now and then.
+Your Pals also react on their own: when you deploy or recall them, when they get knocked out and when they come back, when they level up, when they trust you more, when they're hungry, when it's freezing or scorching, while riding, in combat, and every now and then. They also know whether it's day or night, how hurt they are and how strong they've become.
 
 [h1]Features[/h1]
 [list]
 [*]Real-time chat with any deployed Pal.
 [*]Persistent per-Pal memory and personality, so conversations build on each other over time.
+[*]Aware of the moment: time of day, the Pal's level and its health shape what it says.
+[*]Never loses your words: if you type while your Pal is still answering, your message is sent right after.
 [*]Fully customizable from the launcher: global prompt (including reply language), per-Pal personalities, and which events trigger comments.
 [*]Works with Player2 (free, no key), OpenAI, Gemini, OpenRouter, NovelAI, or a local model.
 [/list]

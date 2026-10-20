@@ -175,14 +175,16 @@ IDLE" stays checked during setup.
 ## File protocol (IPC with the Lua mod)
 
 This is our own design, it doesn't come from any external documentation.
-5 plain text lines, no JSON:
+7 plain text lines, no JSON:
 
 ```
 <Pal name>
 <Pal element>
 <Pal key: stable per-individual, CharacterID#InstanceId>
-<event type: chat, deploy, recall, hunger, cold, heat, ride_start, ride_end, combat, idle, gift_check>
-<content: player's message if event type is "chat", empty or extra detail otherwise>
+<context (mod 0.15+): "ctx:night=1;hour=22;level=23;hp=45", or empty>
+<friendship: "rank,point", or empty>
+<event type: chat, deploy, recall, revive, faint, hunger, cold, heat, ride_start, ride_end, combat, idle, gift_check, vision_check, level_up, trust_up>
+<content: player's message for "chat", "old,new" for level_up/trust_up, empty or extra detail otherwise>
 ```
 
 - The Lua mod writes `request.txt` into `%LOCALAPPDATA%\Palversation\` in that format.

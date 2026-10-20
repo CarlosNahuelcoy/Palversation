@@ -172,6 +172,7 @@ class NovelAIProvider(LLMProvider):
         image_base64: Optional[str] = None,
         memory_hint: str = "",
         time_gap_prefix: str = "",
+        context_hint: str = "",
     ) -> str:
         # NovelAI does not expose the multimodal API required by
         # Palversation's screenshot feature. Fail explicitly rather than
@@ -188,6 +189,7 @@ class NovelAIProvider(LLMProvider):
             pal_passives=pal_passives,
             pal_friendship=pal_friendship,
             memory_hint=memory_hint,
+            context_hint=context_hint,
         )
 
         user_message = build_user_message(event_type, message, time_gap_prefix)

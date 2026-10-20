@@ -77,6 +77,9 @@ class EventsTab(ttk.Frame):
             ("enable_combat_comments", "Combat comments"),
             ("enable_idle_comments", "Idle chatter"),
             ("enable_gift_system", "Gift system (command + ambient)"),
+            ("enable_faint_comments", "Fainting / coming back"),
+            ("enable_level_comments", "Level-up reactions"),
+            ("enable_trust_comments", "Trust rank-up reactions"),
         ]
         for key, label in toggles:
             ttk.Label(content, text=label).grid(row=row, column=0, sticky="w", pady=4)

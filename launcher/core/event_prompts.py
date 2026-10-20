@@ -14,8 +14,10 @@ _EVENT_DESCRIPTIONS = {
     "deploy": "Your trainer just summoned you out of your sphere. Greet them.",
     "recall": "Your trainer just put you back in your sphere. Say goodbye.",
     "hunger": "You are hungry right now. Say so in your own way.",
-    "cold": "You feel very cold right now. Comment on it.",
-    "heat": "You feel very hot right now. Comment on it.",
+    "cold": "It's freezing where you two are right now. Comment on it.",
+    "heat": "It's scorching hot where you two are right now. Comment on it.",
+    "faint": "You just got knocked out in the fight and are fading back into your sphere. Say something brief and weak as you go down -- a few words, not a speech.",
+    "revive": "Your trainer just summoned you again after you got knocked out in a fight. You're back on your feet. React to being back.",
     "ride_start": "Your trainer just got on you to travel together.",
     "ride_end": "Your trainer just got off you.",
     "combat": "You are in the middle of a fight right now, about to strike. Keep it short, like a quick battle cry, not a monologue.",
@@ -102,6 +104,30 @@ def _build_gift_message(content: str) -> str:
     )
 
 
+def _parse_change(content: str):
+    """'old,new' from level_up/trust_up -> (old, new) ints, or (None, None)."""
+    try:
+        old, new = (int(part) for part in content.split(",")[:2])
+        return old, new
+    except ValueError:
+        return None, None
+
+
+def _build_progress_message(event_type: str, content: str) -> str:
+    old, new = _parse_change(content)
+    if event_type == "level_up":
+        detail = f" (from level {old} to {new})" if old is not None else ""
+        return (
+            f"You just got stronger and reached a new level{detail}. React in "
+            "your own way -- proud, surprised, smug, whatever fits you. Keep it short."
+        )
+    return (
+        "Something just shifted between you and your trainer: you trust "
+        "them more than before. Show it through how you talk to them right "
+        "now, without naming any 'trust' or numbers. Keep it short and sincere."
+    )
+
+
 def build_user_message(event_type: str, content: str, time_gap_prefix: str = "") -> str:
     """Returns the text that goes as the 'user' message to the LLM,
     depending on the event type. For 'chat' (or any unknown type), returns
@@ -111,6 +137,8 @@ def build_user_message(event_type: str, content: str, time_gap_prefix: str = "")
     chat, since a deploy after a long break deserves the same context."""
     if event_type == "gift_check":
         result = _build_gift_message(content)
+    elif event_type in ("level_up", "trust_up"):
+        result = _build_progress_message(event_type, content)
     elif event_type == "chat" or event_type not in _EVENT_DESCRIPTIONS:
         result = content
     else:
@@ -190,6 +218,72 @@ def build_friendship_hint(friendship_csv: str) -> str:
     )
 
 
+def parse_context(raw: str) -> dict:
+    """Line 4 of the request since mod 0.15: "ctx:night=1;hour=22;level=23;hp=45".
+    Anything else (older mods sent passive skill IDs there) yields {}."""
+    if not raw or not raw.startswith("ctx:"):
+        return {}
+    context = {}
+    for pair in raw[len("ctx:"):].split(";"):
+        key, sep, value = pair.partition("=")
+        if sep and key.strip():
+            context[key.strip()] = value.strip()
+    return context
+
+
+def _int_or_none(value):
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def build_context_hint(context: dict) -> str:
+    """Turns the in-game "right now" state into a short system-prompt note:
+    time of day, the Pal's level and how hurt it is. Healthy is the
+    default and isn't mentioned, so the Pal doesn't talk about it."""
+    if not context:
+        return ""
+    facts = []
+
+    hour = _int_or_none(context.get("hour"))
+    night = context.get("night")
+    if night == "1":
+        period = "night"
+    elif hour is None:
+        period = "daytime" if night == "0" else ""
+    elif 5 <= hour < 8:
+        period = "dawn"
+    elif 8 <= hour < 12:
+        period = "morning"
+    elif 12 <= hour < 17:
+        period = "afternoon"
+    elif 17 <= hour < 20:
+        period = "evening"
+    else:
+        period = "night"
+    if period:
+        facts.append(f"It's {period}" + (f" (around {hour}:00)" if hour is not None else "") + ".")
+
+    level = _int_or_none(context.get("level"))
+    if level:
+        facts.append(f"You are level {level}.")
+
+    hp = _int_or_none(context.get("hp"))
+    if hp is not None:
+        if hp <= 25:
+            facts.append(f"You're badly hurt (about {hp}% health left).")
+        elif hp <= 60:
+            facts.append("You're a bit hurt.")
+
+    if not facts:
+        return ""
+    return (
+        " Right now in the game: " + " ".join(facts) +
+        " Let this color what you say only when it fits naturally; never recite it."
+    )
+
+
 def build_system_prompt(
     base_prompt: str,
     pal_name: str = "",
@@ -199,6 +293,7 @@ def build_system_prompt(
     pal_passives: str = "",
     pal_friendship: str = "",
     memory_hint: str = "",
+    context_hint: str = "",
 ) -> str:
     """Assembles the full system prompt text from every provider's own
     base prompt plus the same set of hints (name, element, species lore,
@@ -232,6 +327,8 @@ def build_system_prompt(
         system_prompt += build_friendship_hint(pal_friendship)
     if memory_hint:
         system_prompt += build_memory_hint(memory_hint)
+    if context_hint:
+        system_prompt += context_hint
 
     return system_prompt
 

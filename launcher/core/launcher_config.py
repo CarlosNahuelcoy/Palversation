@@ -75,6 +75,9 @@ MOD_CONFIG_DEFAULTS = {
     "enable_combat_comments": "true",
     "enable_idle_comments": "true",
     "enable_gift_system": "true",
+    "enable_trust_comments": "true",
+    "enable_level_comments": "true",
+    "enable_faint_comments": "true",
 }
 
 # Order matters only for how the written file reads to a human; LoadConfig

@@ -72,6 +72,7 @@ class OpenAICompatibleProvider(LLMProvider):
         image_base64: Optional[str] = None,
         memory_hint: str = "",
         time_gap_prefix: str = "",
+        context_hint: str = "",
     ) -> str:
         system_prompt = build_system_prompt(
             self.system_prompt,
@@ -82,6 +83,7 @@ class OpenAICompatibleProvider(LLMProvider):
             pal_passives=pal_passives,
             pal_friendship=pal_friendship,
             memory_hint=memory_hint,
+            context_hint=context_hint,
         )
 
         user_message = build_user_message(event_type, message, time_gap_prefix)

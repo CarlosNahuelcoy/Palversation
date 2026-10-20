@@ -12,14 +12,17 @@ import time
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-from core.pal_prompts import get_prompt, set_prompt
+from core.pal_prompts import load_prompts, save_prompts, get_prompt, set_prompt
 from core.pal_memory import load_memories, get_memory, set_memory, save_memories
-from core.history_store import get_turns, save_history
+from core.history_store import load_history, get_turns, save_history
 from core.pal_names import load_names
 from gui import theme
 from gui.widgets import ScrollableFrame
 
 LARGE_FONT = (theme.FONT_FAMILY, 12)
+# How often the tab checks for new conversation written by the background
+# connection.
+AUTO_REFRESH_MS = 1500
 
 
 class PalsTab(ttk.Frame):
@@ -151,14 +154,55 @@ class PalsTab(ttk.Frame):
         self.history_status_label.pack(side="left", padx=(10, 0))
 
         self.pal_keys = []
+        self._watched_mtimes = None
         self._refresh_pal_list()
+        self.after(AUTO_REFRESH_MS, self._auto_refresh)
 
-    def _refresh_pal_list(self):
-        # Re-read pal_names.json and pal_memory.json from disk: both are
-        # updated by the background launcher process, not by this GUI, so
-        # they can have changed since we last loaded them.
+    # ------------------------------------------------------------------
+    # Always work on what's on disk: the background connection keeps
+    # writing history, names and memories while this tab is open, so any
+    # copy held here goes stale within one message.
+    # ------------------------------------------------------------------
+
+    def _data_paths(self):
+        return (self.app.history_path(), self.app.prompts_path(), self.app.names_path(), self.app.memory_path())
+
+    def _reload_from_disk(self):
+        self.app.history = load_history(self.app.history_path())
+        self.app.prompts = load_prompts(self.app.prompts_path())
         self.app.names = load_names(self.app.names_path())
         self.app.memories = load_memories(self.app.memory_path())
+        self._watched_mtimes = self._read_mtimes()
+
+    def _read_mtimes(self):
+        mtimes = []
+        for path in self._data_paths():
+            try:
+                mtimes.append(path.stat().st_mtime)
+            except OSError:
+                mtimes.append(None)
+        return tuple(mtimes)
+
+    def _auto_refresh(self):
+        """Shows new conversation as it happens: when a data file changed
+        on disk, refresh the list and the selected Pal -- unless you're in
+        the middle of editing one of its boxes."""
+        try:
+            if self._read_mtimes() != self._watched_mtimes and not self._has_unsaved_edits():
+                self._refresh_pal_list()
+        finally:
+            self.after(AUTO_REFRESH_MS, self._auto_refresh)
+
+    def _has_unsaved_edits(self):
+        return any(box.edit_modified() for box in (self.prompt_text, self.memory_text, self.history_text))
+
+    def _set_box(self, box, text):
+        box.delete("1.0", "end")
+        box.insert("1.0", text)
+        box.edit_modified(False)
+
+    def _refresh_pal_list(self):
+        self._reload_from_disk()
 
         keys = set(self.app.history.keys()) | set(self.app.prompts.keys()) | set(self.app.names.keys()) | set(self.app.memories.keys())
         self.pal_keys = sorted(keys)
@@ -167,42 +211,55 @@ class PalsTab(ttk.Frame):
             display_name = self.app.names.get(key, key)
             self.pal_listbox.insert("end", display_name)
 
+        # Keep the same Pal selected (rebuilding the list clears the
+        # selection, which used to leave stale text on screen).
+        if self.current_pal_key in self.pal_keys:
+            index = self.pal_keys.index(self.current_pal_key)
+            self.pal_listbox.selection_set(index)
+            self.pal_listbox.see(index)
+            self._show_pal(self.current_pal_key)
+
     def _on_select(self, event=None):
         selection = self.pal_listbox.curselection()
         if not selection:
             return
-        self.current_pal_key = self.pal_keys[selection[0]]
-
-        self.prompt_text.delete("1.0", "end")
-        self.prompt_text.insert("1.0", get_prompt(self.app.prompts, self.current_pal_key))
+        self._show_pal(self.pal_keys[selection[0]])
         self.prompt_status_label.configure(text="")
-
-        self.memory_text.delete("1.0", "end")
-        self.memory_text.insert("1.0", get_memory(self.app.memories, self.current_pal_key))
         self.memory_status_label.configure(text="")
+        self.history_status_label.configure(text="")
 
-        turns = get_turns(self.app.history, self.current_pal_key)
+    def _show_pal(self, pal_key):
+        self.current_pal_key = pal_key
+        self._set_box(self.prompt_text, get_prompt(self.app.prompts, pal_key))
+        self._set_box(self.memory_text, get_memory(self.app.memories, pal_key))
+
+        turns = get_turns(self.app.history, pal_key)
         self._current_turns_snapshot = turns  # used by _save_history to preserve timestamps by position
-        self.history_text.delete("1.0", "end")
+        lines = []
         for turn in turns:
             speaker = "You" if turn.get("role") == "user" else "Pal"
-            self.history_text.insert("end", f"{speaker}: {turn.get('content', '')}\n\n")
-        self.history_status_label.configure(text="")
+            lines.append(f"{speaker}: {turn.get('content', '')}\n\n")
+        self._set_box(self.history_text, "".join(lines))
+        self.history_text.see("end")
 
     def _save_prompt(self):
         if not self.current_pal_key:
             messagebox.showwarning("Palversation", "Select a Pal first.")
             return
+        self.app.prompts = load_prompts(self.app.prompts_path())
         set_prompt(self.app.prompts, self.current_pal_key, self.prompt_text.get("1.0", "end"))
-        self.app.save_all()
+        save_prompts(self.app.prompts_path(), self.app.prompts)
+        self.prompt_text.edit_modified(False)
         self.prompt_status_label.configure(text="Saved.", foreground="#4cc27a")
 
     def _save_memory(self):
         if not self.current_pal_key:
             messagebox.showwarning("Palversation", "Select a Pal first.")
             return
+        self.app.memories = load_memories(self.app.memory_path())
         set_memory(self.app.memories, self.current_pal_key, self.memory_text.get("1.0", "end"))
-        self.app.save_all()
+        save_memories(self.app.memory_path(), self.app.memories)
+        self.memory_text.edit_modified(False)
         self.memory_status_label.configure(text="Saved.", foreground="#4cc27a")
 
     def _clear_memory(self):
@@ -212,9 +269,10 @@ class PalsTab(ttk.Frame):
         display_name = self.app.names.get(self.current_pal_key, self.current_pal_key)
         if not messagebox.askyesno("Palversation", f"Clear the long-term memory for {display_name}?"):
             return
+        self.app.memories = load_memories(self.app.memory_path())
         self.app.memories.pop(self.current_pal_key, None)
         save_memories(self.app.memory_path(), self.app.memories)
-        self.memory_text.delete("1.0", "end")
+        self._set_box(self.memory_text, "")
         self.memory_status_label.configure(text="Cleared.", foreground="#4cc27a")
 
     def _save_history(self):
@@ -244,12 +302,14 @@ class PalsTab(ttk.Frame):
             ) else now
             new_turns.append({"role": role, "content": content, "ts": ts})
 
+        self.app.history = load_history(self.app.history_path())
         if new_turns:
             self.app.history[self.current_pal_key] = new_turns
         else:
             self.app.history.pop(self.current_pal_key, None)
         save_history(self.app.history_path(), self.app.history)
         self._current_turns_snapshot = new_turns
+        self.history_text.edit_modified(False)
 
         if skipped:
             self.history_status_label.configure(
@@ -266,8 +326,9 @@ class PalsTab(ttk.Frame):
         display_name = self.app.names.get(self.current_pal_key, self.current_pal_key)
         if not messagebox.askyesno("Palversation", f"Clear conversation history for {display_name}?"):
             return
+        self.app.history = load_history(self.app.history_path())
         self.app.history.pop(self.current_pal_key, None)
         save_history(self.app.history_path(), self.app.history)
         self._current_turns_snapshot = []
-        self._on_select()
+        self._set_box(self.history_text, "")
         self.history_status_label.configure(text="Cleared.", foreground="#4cc27a")

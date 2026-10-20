@@ -20,7 +20,7 @@ from core.pal_prompts import load_prompts, save_prompts, get_prompt, set_prompt
 from core.pal_names import load_names, save_names, set_name
 from core.pal_data import load_pal_data, resolve_pal_data_path, get_species_info, build_species_hint, export_species_names_lookup
 from core.pal_memory import load_memories, save_memories, get_memory, set_memory, build_summarization_message
-from core.event_prompts import build_personality_generation_message
+from core.event_prompts import build_personality_generation_message, parse_context, build_context_hint
 from core.screenshot import capture_foreground_window_base64
 from core.logger import log
 
@@ -47,9 +47,9 @@ def run_watch_loop(
     response_path = watch_folder / response_filename
 
     history = load_history(history_path)
-    # Per-pal custom prompts and display names are loaded once at startup,
-    # same as history. If the GUI launcher changes them while this is
-    # running, use Restart to pick up the change.
+    # Re-read again right before every exchange (below), so edits made in
+    # the Pals tab -- a cleared history, a new personality -- apply to the
+    # very next message instead of being overwritten by a stale copy.
     prompts = load_prompts(prompts_path)
     names = load_names(names_path)
     memories = load_memories(memory_path)
@@ -105,7 +105,17 @@ def run_watch_loop(
         if raw is not None:
             delete_request(request_path)
 
+            history = load_history(history_path)
+            prompts = load_prompts(prompts_path)
+            names = load_names(names_path)
+            memories = load_memories(memory_path)
+
             pal_name, pal_element, pal_key, pal_passives, pal_friendship, event_type, content = parse_request(raw)
+            # Mod 0.15+ sends the "right now" context on the old passives line.
+            context = parse_context(pal_passives)
+            if context or pal_passives.startswith("ctx:"):
+                pal_passives = ""
+            context_hint = build_context_hint(context)
             log(f"[Palversation Launcher] Pal: {pal_name} ({pal_element}) [{pal_key}] - Passives: {pal_passives} - Friendship: {pal_friendship} - Event: {event_type} - Content: {content}")
             try:
                 species_id = pal_key.split("#")[0] if pal_key else ""
@@ -175,6 +185,7 @@ def run_watch_loop(
                     image_base64=image_base64,
                     memory_hint=memory_hint,
                     time_gap_prefix=time_gap_prefix,
+                    context_hint=context_hint,
                 )
                 log(f"[Palversation Launcher] Response: {respuesta}")
                 write_response(response_path, respuesta)

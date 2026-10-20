@@ -33,10 +33,10 @@ from core.launcher_config import (
     get_mod_config_path,
     migrate_legacy_mod_config,
 )
-from core.pal_prompts import load_prompts, save_prompts
+from core.pal_prompts import load_prompts
 from core.history_store import load_history
 from core.pal_names import load_names
-from core.pal_memory import load_memories, save_memories
+from core.pal_memory import load_memories
 from core.paths import get_launcher_dir, get_bundled_dir, get_data_dir
 from core.update_check import CURRENT_VERSION, is_newer_version, fetch_latest_release
 from core.install_check import run_setup
@@ -587,8 +587,10 @@ class PalversationApp(tk.Tk):
         try:
             save_launcher_config(self.config_data)
             save_mod_config(self.mod_config_path(), self.mod_config)
-            save_prompts(self.prompts_path(), self.prompts)
-            save_memories(self.memory_path(), self.memories)
+            # Personalities, memories and history are saved by the Pals tab
+            # itself, one file at a time and always on top of a fresh read
+            # from disk -- writing this whole in-memory copy here could
+            # overwrite newer data the background connection just wrote.
         except Exception as e:
             messagebox.showerror("Palversation", f"Could not save settings: {e}")
             return
