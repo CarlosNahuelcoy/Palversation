@@ -1,0 +1,50 @@
+[size=6][b]Palversation v1.2.0 - Rebuilt from the ground up[/b][/size]
+
+First of all, sorry for the long silence. Palversation was my first mod, and while I was away I kept finding things I could have done much better from the start. So instead of patching around them, I went back and rebuilt a big part of it, starting with the thing most of you struggled with: [b]installation[/b]. It should now be a lot simpler, and I hope the experience in-game feels better too.
+
+Thank you to everyone who kept commenting, reporting bugs and sharing workarounds while I was gone. Many of the fixes below come straight from your reports.
+
+[size=5][b]Installing is now 3 steps[/b][/size]
+[list=1]
+[*]Have [b]UE4SS Experimental (Palworld)[/b] installed.
+[*]Download the new launcher from [url=https://github.com/CarlosNahuelcoy/Palversation/releases]GitHub Releases[/url] (Nexus doesn't allow programs, so it lives there), extract it anywhere and open Palversation.exe.
+[*]Press [b]Connect Account[/b], then [b]Play[/b].
+[/list]
+No more picking folders, copying the mod by hand or editing mods.txt.
+
+[size=5][b]What's new: setup[/b][/size]
+[list]
+[*][b]The launcher installs the mod for you.[/b] It finds Palworld through Steam and installs, updates and enables the in-game mod by itself. The file on this page is now optional, for people who prefer installing the mod by hand.
+[*][b]No more Folders tab.[/b] The mod and the launcher find each other on their own, which fixes the most common "!pal does nothing" problem.
+[*][b]New Setup tab[/b] with a green check or red cross for each part, and a hint for anything missing.
+[*][b]New Play button:[/b] checks everything, connects and launches the game.
+[*][b]No more silent failures:[/b] if the launcher isn't running, your Pal tells you in the game chat.
+[*][b]Your data is safe across updates:[/b] settings and Pal memories now live in a folder that survives updates.
+[/list]
+
+[size=5][b]What's new: your Pals[/b][/size]
+[list]
+[*][b]They react to more moments:[/b] getting knocked out (no more cheerful goodbyes when they faint), coming back after fainting, leveling up, and trusting you more.
+[*][b]They know what's going on:[/b] day or night, how hurt they are and how strong they've become all shape what they say.
+[*][b]Your messages are never lost:[/b] if you type while your Pal is still answering, it's sent right after.
+[*][b]Less spam:[/b] long fights and quick Pal swaps no longer turn into constant chatter.
+[*][b]Cold and heat comments are reliable now.[/b]
+[/list]
+
+[size=5][b]Fixes[/b][/size]
+[list]
+[*][b]Response timeout now works for every provider[/b] (it used to cut off at 30 seconds, which broke slow and local models).
+[*][b]Easier local models:[/b] the server address alone is enough, e.g. http://localhost:11434 for Ollama.
+[*][b]Pals tab:[/b] Clear History now clears right away and the conversation doesn't come back.
+[*]Dropped the unused PalSchema dependency.
+[/list]
+
+[size=5][b]How to update[/b][/size]
+[list]
+[*]Download the new launcher and open it. If you installed the mod by hand from this page before, the launcher replaces it with the new version automatically.
+[*]If you extract it over the old one, your settings and memories move over automatically. If you extract it somewhere else, use [b]Setup > Import old data...[/b] and pick your old launcher folder.
+[/list]
+
+Windows may show a SmartScreen warning: it's a false positive common to unsigned Python programs, and the full source is on GitHub. Click "More info" > "Run anyway".
+
+Thanks for sticking with Palversation. If anything doesn't work, check the Setup tab first, and let me know in the comments.

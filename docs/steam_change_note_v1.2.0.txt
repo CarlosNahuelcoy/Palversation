@@ -1,0 +1,11 @@
+Sorry for the long silence! Palversation was my first mod, and I rebuilt a lot of it now that I know how to do it better, starting with installation.
+
+IMPORTANT: update the launcher too (v1.2): github.com/CarlosNahuelcoy/Palversation/releases
+
+- No more Folders tab: the launcher finds Palworld by itself. Open it, Connect Account, Play.
+- New Setup tab shows what's missing and how to fix it.
+- Pals react to fainting, coming back, leveling up and growing trust, and know if it's day or night and how hurt they are.
+- Messages typed while your Pal is answering are no longer lost.
+- Response timeout now works for local models.
+
+Your Pals' memories carry over (if you extract the launcher elsewhere: Setup > Import old data). Thanks for your patience!
