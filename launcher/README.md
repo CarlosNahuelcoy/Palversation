@@ -5,6 +5,18 @@ provider -- Player2, OpenAI, Gemini, OpenRouter, or a Custom
 OpenAI-compatible endpoint (e.g. local Ollama). Runs as a single program:
 settings + the live connection, in one window.
 
+## Installing (players)
+
+1. Install **UE4SS Experimental (Palworld)** if you don't have it yet
+   (the launcher's Setup tab links to it and tells you if it's missing).
+2. Extract the Palversation zip anywhere and open `Palversation.exe`.
+   It finds Palworld through Steam and installs/updates the in-game mod
+   by itself -- there's no separate mod download and no folder to pick.
+3. Press **Connect Account** (Player2) in the General tab, then **Play**.
+
+Keep the launcher open (minimized is fine) while you play. If it isn't
+running, your Pal says so in the game chat instead of staying silent.
+
 ## Building the standalone .exe
 
 Run `build_exe.bat` from an activated venv with `requirements.txt`
@@ -18,11 +30,17 @@ In `cmd.exe` either `build_exe.bat` or `.\build_exe.bat` works. Find
 `Palversation.exe` inside the `dist` folder afterward -- it's a single
 file, no Python install needed on the end user's machine.
 
+The in-game Lua mod (`mod/Palversation/` at the repo root) is bundled inside the build
+and installed into the game by the launcher, so a release is just the
+launcher zip. Bump `VERSION` in `mod/Palversation/Scripts/main.lua` when
+the mod changes; the launcher replaces any installed copy that differs.
+
 `config.json`, `pal_history.json`, `pal_prompts.json`, and the rest are
-all created automatically next to the exe the first time it runs (see
-`core/paths.py` -- every file path resolves relative to the exe itself
-when running as a build, not relative to some internal temp folder, so
-saved data survives between runs correctly). If you want to ship the
+all created automatically in `%LOCALAPPDATA%\Palversation\` the first
+time it runs (see `core/paths.py`), so updating, moving or deleting the
+launcher folder never loses a Pal's memories. Files left next to an old
+exe are copied over automatically, or with "Import old data..." in the
+Setup tab if the new version was extracted elsewhere. If you want to ship the
 curated `pal_data.json` (real species names + lore) alongside it, just
 copy that file into the `dist` folder before zipping it up for
 distribution.
@@ -32,10 +50,10 @@ distribution.
 - [x] Register your own app on the **Player2 Developer Dashboard** and
       put the real Client ID in `providers/player2_auth.py`'s
       `PLAYER2_CLIENT_ID` -- done, "Connect Account" works out of the box.
-- [ ] Double-check `config.json`'s `api_keys` still says
-      `"PUT_YOUR_API_KEY_HERE"`, not a real key.
-- [ ] Rebuild the exe after changing either of the above, since they're
-      baked into it at build time.
+- [x] No API keys ship with the build: `config.json` is created per
+      player in `%LOCALAPPDATA%\Palversation\` and is git-ignored.
+- [ ] Bump `CURRENT_VERSION` in `core/update_check.py` (and the mod's
+      `VERSION` + `info.json` if the mod changed), then rebuild.
 
 ## One program, not two
 
@@ -65,7 +83,6 @@ belongs to.
 ```
 palversation-launcher/
   main.py                 CLI-only entry point (debugging, no GUI).
-  config.json              Editable configuration (provider, API keys, prompt, etc).
   requirements.txt          Dependencies (just 'requests' for now).
   run.bat                    Windows shortcut: activates venv + runs main.py (CLI only).
   run_gui.bat                 Windows shortcut: activates venv + runs the GUI (normal use).
@@ -80,8 +97,8 @@ palversation-launcher/
     tab_pals.py                       Per-Pal list (friendly names), personality editor,
                                        history viewer.
     tab_events.py                      Per-event on/off toggles and timing settings.
-    tab_directories.py                  Mod folder / IPC folder pickers (validates
-                                         absolute paths).
+    tab_setup.py                        What was found/installed (Palworld, UE4SS,
+                                         mod, provider) with a fix for each problem.
     tab_console.py                       Live output from the background watcher thread.
   providers/
     base.py                 Interface any provider must implement.
@@ -102,8 +119,16 @@ palversation-launcher/
     pal_prompts.py                       Persistent per-Pal custom personality (JSON).
     pal_names.py                          Persistent per-Pal friendly display name (JSON).
     launcher_config.py                      Reads/writes config.json AND the mod's config.txt.
-  ipc/                       Folder where request.txt / response.txt are
-                              exchanged with the Lua mod.
+    game_locator.py                          Finds Palworld (Steam registry + libraries) and UE4SS.
+    mod_installer.py                          Installs/updates the bundled mod, enables it for UE4SS.
+    install_check.py                           Runs the whole automatic setup + diagnostics.
+  ../mod/Palversation/       The in-game Lua mod (main.lua, info.json, enabled.txt), at the
+                              repo root; bundled into the build and installed by the launcher.
+  %LOCALAPPDATA%\Palversation\   Fixed data folder shared with the Lua mod: config.txt,
+                              request.txt / response.txt, pal_species_names.txt.
+                              Both sides find it on their own -- nothing to configure.
+                              Also holds the player's own files below:
+  config.json                Provider, API keys, prompt, etc. Created on first run.
   pal_history.json           Generated automatically. One conversation
                               history per Pal, keyed by its stable
                               CharacterID#InstanceId key.
@@ -142,10 +167,10 @@ IDLE" stays checked during setup.
    python gui\app.py
    ```
    (or double-click `run_gui.bat`)
-4. In the **Folders** tab, set the mod folder and the shared IPC folder
-   (both as absolute paths, use Browse). In the **General** tab, connect
-   or paste your provider's API key, and adjust the prompt if you want.
-   Everything saves and takes effect immediately.
+4. The launcher finds Palworld and installs the mod into it on startup
+   (see the **Setup** tab). In the **General** tab, connect or paste your
+   provider's API key. Settings save immediately; the mod re-reads them
+   every few seconds, so there's no need to restart the game.
 
 ## File protocol (IPC with the Lua mod)
 
@@ -160,10 +185,10 @@ This is our own design, it doesn't come from any external documentation.
 <content: player's message if event type is "chat", empty or extra detail otherwise>
 ```
 
-- The Lua mod writes `ipc/request.txt` in that format.
+- The Lua mod writes `request.txt` into `%LOCALAPPDATA%\Palversation\` in that format.
 - The launcher detects it, deletes it, calls the LLM provider (including
   this specific Pal's prior conversation turns and custom personality,
-  loaded by its stable key), and writes `ipc/response.txt`:
+  loaded by its stable key), and writes `response.txt` next to it:
   ```
   <response text>
   ```
@@ -179,10 +204,10 @@ With the launcher running, you can simulate the Lua mod by writing the
 request file yourself (PowerShell):
 
 ```
-"Chillet`nDragon`nChillet#1`nchat`nhello" | Out-File -Encoding utf8 ipc\request.txt
+"Chillet`nDragon`nChillet#1`n`n`nchat`nhello" | Out-File -Encoding utf8 $env:LOCALAPPDATA\Palversation\request.txt
 ```
 
-A `ipc\response.txt` should appear a few seconds later.
+A `response.txt` should appear in that same folder a few seconds later.
 
 ## Adding another provider
 

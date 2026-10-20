@@ -2,76 +2,68 @@
 
 A Palworld mod + launcher that lets your Pals actually talk back, using an
 LLM. Pick a provider in the launcher: Player2 (one-click account connect,
-no key to copy), OpenAI, Gemini, OpenRouter, or a Custom OpenAI-compatible
-endpoint (e.g. a local Ollama server).
+no key to copy), OpenAI, Gemini, OpenRouter, NovelAI, or a Custom
+OpenAI-compatible endpoint (e.g. a local Ollama server).
 
 This repo has two parts:
 
-- **[`mod/`](mod/)** -- the UE4SS Lua mod itself (`Scripts/main.lua`).
-  Install this into your Palworld UE4SS Mods folder like any other mod.
 - **[`launcher/`](launcher/)** -- the desktop app (Python + a GUI) that
-  actually talks to the LLM provider and exchanges messages with the mod.
-  See [`launcher/README.md`](launcher/README.md) for how to run it from
-  source or build it into a standalone `.exe`.
+  talks to the LLM provider and exchanges messages with the mod. It also
+  finds Palworld and installs the mod for you. See
+  [`launcher/README.md`](launcher/README.md) for running it from source or
+  building the `.exe`.
+- **[`mod/`](mod/)** -- the UE4SS Lua mod itself (`Scripts/main.lua`). It
+  ships inside the launcher, so players don't need to install it by hand.
 
-## Installing (if you're starting from zero)
+## Installing
 
-### 1. Install UE4SS (the mod loader Palworld mods run on)
+1. **Get UE4SS** (the mod loader Palworld Lua mods run on), if you don't
+   have it yet: subscribe to
+   [UE4SS Experimental (Palworld) on the Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3625223587).
+2. **Download the launcher** from this repo's [Releases](../../releases)
+   page, extract the zip anywhere and open `Palversation.exe` (no Python
+   needed). It finds Palworld through Steam and installs/updates the mod
+   by itself. Its **Setup** tab shows a check for each part (Palworld,
+   UE4SS, the mod, the AI provider), with a hint for anything missing.
+3. **Connect a provider** in the **General** tab:
+   - **Player2** -- no key to copy. Click **Connect Account**; it either
+     grabs a key from the local Player2 app instantly, or opens your
+     browser for a one-time approval.
+   - **OpenAI / Gemini / OpenRouter / NovelAI** -- paste your own API key,
+     and set the model if you want something other than the default.
+   - **Custom (OpenAI-compatible)** -- for a local server or any other
+     OpenAI-compatible endpoint. The server address alone is enough
+     (e.g. `http://localhost:11434` for Ollama, `http://localhost:1234/v1`
+     for LM Studio); the API key can stay empty if the server doesn't
+     need one. Local models can be slow: raise **Response timeout** in
+     the Events tab if replies time out.
+4. Press **Play**. In-game, deploy a Pal and type `!pal <message>` in
+   chat. Keep the launcher open while you play (minimized is fine); if
+   it isn't running, your Pal says so in the chat.
 
-If you already have UE4SS working for other Palworld mods, skip to step 2.
+You can also subscribe to
+[Palversation on the Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3785893955)
+instead of letting the launcher install the mod -- the launcher detects
+that and leaves the Workshop copy alone. You still need the launcher
+itself from Releases (Steam doesn't allow programs on the Workshop).
 
-1. Subscribe to
-   [UE4SS Experimental (Palworld) on the Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3625223587)
-   and let Steam download/install it -- this is the recommended way to
-   get UE4SS for Palworld, and the Workshop page has its own
-   troubleshooting/FAQ if something doesn't load.
-2. Launch Palworld once. If UE4SS is working, you'll see a black console
-   window pop up alongside the game.
+### Updating from v1.0.x
 
-### 2. Install the Palversation mod
-
-Palversation is distributed on Nexus Mods, not via the Steam Workshop
-(the Workshop entry above is only for UE4SS itself, the loader).
-
-1. Download the mod from Nexus (or grab `mod/` from this repo).
-2. Copy the `Palversation` folder (the one containing
-   `Scripts\main.lua`) into your UE4SS `Mods` folder. Since UE4SS was
-   installed via the Steam Workshop, that folder is at:
-   `steamapps\common\Palworld\Mods\NativeMods\UE4SS\Mods\Palversation\`
-   (per the Workshop page's own FAQ on installing Nexus mods).
-3. In that same `Mods` folder, open `mods.txt` in a text editor and add
-   a line for it:
-   ```
-   Palversation : 1
-   ```
-
-### 3. Install and set up the launcher
-
-1. Install `launcher/` (or grab `Palversation.exe` from this repo's
-   [Releases](../../releases) page and run it directly, no Python
-   needed).
-2. In the app's **Folders** tab, point "Mod Folder" at the
-   `...\Palversation\` folder from step 2.2 above.
-3. In the **General** tab, pick a provider from the dropdown:
-   - **Player2** -- no key to copy. Click **Connect Account**; it
-     either grabs a key from the local Player2 app instantly, or opens
-     your browser for a one-time approval.
-   - **OpenAI / Gemini / OpenRouter** -- paste your own API key from
-     that provider into the API key field, and set the model if you
-     want something other than the default.
-   - **Custom (OpenAI-compatible)** -- for a local server (e.g.
-     Ollama) or any other OpenAI-compatible endpoint. Set the Base URL
-     and model; the API key field can stay empty if the server doesn't
-     need one.
-   Click **Test Connection** to confirm it works, then **Save**.
-4. In-game: deploy a Pal and type `!pal <message>` in chat -- if it
-   responds, everything's installed and connected correctly.
+- You no longer pick any folders: the old Folders tab is gone, and the
+  mod and launcher find each other through `%LOCALAPPDATA%\Palversation\`.
+- Your settings and your Pals' memories now live in that same folder, so
+  future updates never lose them. If you extracted the new version
+  somewhere other than the old one, use **Setup > Import old data...** and
+  pick your old launcher folder.
+- The mod must be v0.14.0 or newer (the launcher installs it; Workshop
+  subscribers get it from Steam). The PalSchema dependency was dropped.
 
 ## Running from source / building it yourself
 
 See [`launcher/README.md`](launcher/README.md) -- it covers running with
 Python directly, the file protocol between the mod and the launcher, and
-`launcher/build_exe.bat` for building your own `.exe`.
+`launcher/build_exe.bat` for building your own `.exe` (it bundles `mod/`
+inside the build automatically).
 
 ## License
 

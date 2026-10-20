@@ -1,15 +1,22 @@
 """
-Best-effort diagnostics for the three-piece Palversation install (UE4SS +
-mod folder + launcher). Nothing here is a hard requirement to start the
-watcher -- these are advisory checks, run at startup and on demand from a
-"Verify installation" button, so the player gets an actionable message
-instead of a silent "!pal did nothing".
+Automatic setup + diagnostics for the Palversation install. Finds the
+game, checks UE4SS, installs/updates the bundled Lua mod and checks the
+AI provider -- everything the player used to do by hand. Run at startup,
+from the Setup tab, and before launching the game with Play.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
+
+from core.game_locator import find_palworld_dir, find_ue4ss, UE4SSInstall
+from core.mod_installer import (
+    install_or_update_mod, installed_mod_dir, read_mod_version, get_bundled_mod_dir, is_workshop_managed,
+    MIN_COMPATIBLE_MOD_VERSION, _version_tuple,
+)
+
+UE4SS_DOWNLOAD_URL = "https://github.com/Okaetsu/RE-UE4SS/releases/tag/experimental-palworld"
 
 
 class CheckStatus(Enum):
@@ -24,122 +31,83 @@ class CheckResult:
     message: str
 
 
-# The exact folder chain UE4SS expects a Lua mod to live in, read from
-# innermost to outermost parent: mod_folder itself sits directly inside
-# .../Mods/NativeMods/UE4SS/Mods/<mod_folder_name>.
-EXPECTED_LOCATION_TAIL = ("Mods", "UE4SS", "NativeMods", "Mods")
+@dataclass
+class SetupReport:
+    palworld_dir: Optional[Path] = None
+    ue4ss: Optional[UE4SSInstall] = None
+    mod_changed: bool = False
+    checks: List[Tuple[str, CheckResult]] = field(default_factory=list)
 
+    @property
+    def game_ready(self) -> bool:
+        """Palworld found, UE4SS present, mod installed."""
+        return all(result.status == CheckStatus.OK for label, result in self.checks if label != "AI provider")
 
-def check_mod_location(resolved_folder: Path) -> CheckResult:
-    """
-    Checks that the (already-resolved, main.lua-containing) mod folder is
-    actually installed inside Palworld's UE4SS Mods folder, not just
-    sitting somewhere else with the right files in it -- e.g. still in a
-    Downloads folder, extracted to the Desktop, or dropped directly into
-    Palworld/Mods instead of Palworld/Mods/NativeMods/UE4SS/Mods. This is
-    the other common source of "!pal does nothing": the launcher points
-    at a real main.lua, but UE4SS itself never loads it because it's not
-    where UE4SS actually looks.
-    """
-    parents = list(resolved_folder.parents)
-    actual_tail = tuple(p.name for p in parents[:4])
-
-    if actual_tail == EXPECTED_LOCATION_TAIL:
-        return CheckResult(
-            CheckStatus.OK,
-            "This folder is correctly installed inside Palworld's UE4SS "
-            "Mods folder.",
-        )
-
-    return CheckResult(
-        CheckStatus.MISSING,
-        f"{resolved_folder} has a main.lua, but doesn't look like it's "
-        "inside Palworld's UE4SS Mods folder. It should be at "
-        ".../Palworld/Mods/NativeMods/UE4SS/Mods/Palversation -- if this "
-        "is a leftover copy (e.g. still in Downloads, or on the Desktop), "
-        "move or reinstall it into that folder, then point the launcher "
-        "there instead.",
-    )
-
-
-def find_mod_lua_folder(selected_folder: Path) -> Optional[Path]:
-    """
-    Given whatever folder the player picked in the Folders tab, return the
-    folder that should actually be used (the one directly containing
-    Scripts/main.lua), auto-correcting the single most common setup
-    mistake: pointing at the Scripts subfolder itself instead of its
-    parent.
-
-    Returns None if neither the given folder nor its parent look like a
-    valid Palversation install (no main.lua found either way) -- in that
-    case the caller should not silently guess further, just surface the
-    problem.
-    """
-    if not selected_folder or not selected_folder.is_dir():
+    def first_problem(self) -> Optional[Tuple[str, CheckResult]]:
+        for label, result in self.checks:
+            if result.status != CheckStatus.OK:
+                return label, result
         return None
 
-    # Correct case: the folder itself has Scripts/main.lua inside.
-    if (selected_folder / "Scripts" / "main.lua").is_file():
-        return selected_folder
 
-    # Common mistake: the folder IS Scripts, main.lua is right here, and
-    # what we actually want is its parent.
-    if selected_folder.name == "Scripts" and (selected_folder / "main.lua").is_file():
-        return selected_folder.parent
+def _provider_check(config: dict) -> CheckResult:
+    from providers.registry import get_provider_spec
+    provider_id = config.get("provider", "player2")
+    try:
+        spec = get_provider_spec(provider_id)
+    except ValueError:
+        return CheckResult(CheckStatus.MISSING, f"Unknown provider '{provider_id}'. Pick one in the General tab.")
+    key = config.get("api_keys", {}).get(provider_id, "")
+    if spec.requires_api_key and (not key or key == "PUT_YOUR_API_KEY_HERE"):
+        action = "enter your API key" if spec.key_is_pasted else "press Connect Account"
+        return CheckResult(CheckStatus.MISSING, f"Not connected yet. Go to the General tab and {action}.")
+    return CheckResult(CheckStatus.OK, f"{spec.display_name} is set up.")
 
-    return None
 
+def run_setup(config: dict, install: bool = True) -> SetupReport:
+    """install=False only reports, without writing anything to the game folder."""
+    report = SetupReport()
 
-def check_mod_folder(selected_folder: Optional[Path]) -> tuple[CheckResult, Optional[Path]]:
-    """
-    Returns the check result AND the corrected folder to actually use (or
-    None if nothing usable was found). Callers that persist the mod
-    folder setting should save the corrected path back, so this doesn't
-    have to run the correction every single time.
-    """
-    if not selected_folder or not str(selected_folder).strip():
-        return CheckResult(
+    report.palworld_dir = find_palworld_dir(config.get("palworld_dir", ""))
+    if report.palworld_dir is None:
+        report.checks.append(("Palworld", CheckResult(
             CheckStatus.MISSING,
-            "No mod folder is set yet. Go to the Folders tab and point it "
-            "at your Palversation install.",
-        ), None
-
-    resolved = find_mod_lua_folder(selected_folder)
-    if resolved is None:
-        return CheckResult(
-            CheckStatus.MISSING,
-            f"main.lua wasn't found in {selected_folder} or its Scripts "
-            "subfolder. Make sure this points at the Palversation mod folder.",
-        ), None
-
-    if resolved != selected_folder:
-        return CheckResult(
-            CheckStatus.OK,
-            f"Auto-corrected: you had pointed at the Scripts folder, now "
-            f"using {resolved} instead.",
-        ), resolved
-
-    return CheckResult(CheckStatus.OK, "Mod folder looks correct."), resolved
-
-
-def run_full_check(selected_mod_folder: Optional[Path]) -> list[tuple[str, CheckResult]]:
-    """
-    Runs every static check in order and returns labeled results, ready to
-    show in a summary dialog. Doesn't touch the provider or the watcher --
-    that's a separate, heavier check (see the end-to-end conversation
-    test).
-    """
-    results: list[tuple[str, CheckResult]] = []
-
-    mod_result, corrected_folder = check_mod_folder(selected_mod_folder)
-    results.append(("Mod folder", mod_result))
-
-    if corrected_folder is not None:
-        results.append(("Mod location", check_mod_location(corrected_folder)))
+            "Couldn't find Palworld automatically. Use \"Choose Palworld folder...\" "
+            "and select the folder that contains Palworld.exe.",
+        )))
     else:
-        results.append((
-            "Mod location",
-            CheckResult(CheckStatus.UNKNOWN, "Skipped, fix the mod folder first."),
-        ))
+        report.checks.append(("Palworld", CheckResult(CheckStatus.OK, f"Found at {report.palworld_dir}")))
 
-    return results
+    if report.palworld_dir is not None:
+        report.ue4ss = find_ue4ss(report.palworld_dir)
+    if report.ue4ss is None:
+        status = CheckStatus.MISSING if report.palworld_dir else CheckStatus.UNKNOWN
+        message = (
+            "UE4SS (Palworld experimental build) isn't installed. It's what lets "
+            "Palworld load Lua mods -- use \"Get UE4SS\", install it, then press Re-check."
+            if report.palworld_dir else "Skipped until Palworld is found."
+        )
+        report.checks.append(("UE4SS", CheckResult(status, message)))
+    else:
+        report.checks.append(("UE4SS", CheckResult(CheckStatus.OK, f"Found at {report.ue4ss.root}")))
+
+    if report.ue4ss is None:
+        report.checks.append(("Palversation mod", CheckResult(CheckStatus.UNKNOWN, "Installed automatically once UE4SS is found.")))
+    elif install:
+        result = install_or_update_mod(report.ue4ss.mods_dir)
+        report.mod_changed = result.changed
+        report.checks.append(("Palversation mod", CheckResult(
+            CheckStatus.OK if result.ok else CheckStatus.MISSING, result.message,
+        )))
+    else:
+        installed = read_mod_version(installed_mod_dir(report.ue4ss.mods_dir))
+        bundled_dir = get_bundled_mod_dir()
+        bundled = read_mod_version(bundled_dir) if bundled_dir else None
+        workshop_ok = is_workshop_managed(report.ue4ss.mods_dir) and _version_tuple(installed) >= _version_tuple(MIN_COMPATIBLE_MOD_VERSION)
+        if installed and (installed == bundled or workshop_ok):
+            report.checks.append(("Palversation mod", CheckResult(CheckStatus.OK, f"v{installed} installed.")))
+        else:
+            report.checks.append(("Palversation mod", CheckResult(CheckStatus.MISSING, "Not installed or outdated.")))
+
+    report.checks.append(("AI provider", _provider_check(config)))
+    return report

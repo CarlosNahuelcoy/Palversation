@@ -1,12 +1,11 @@
 {
   "ModName": "Palversation",
   "PackageName": "Palversation",
-  "Version": "0.1.0",
+  "Version": "0.14.0",
   "DebugMode": false,
   "MinRevision": 82182,
   "Author": "Gerik Uylerk",
   "Dependencies": [
-    "PalSchema",
     "UE4SSExperimentalPW"
   ],
   "Tags": [

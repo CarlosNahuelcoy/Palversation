@@ -11,9 +11,11 @@ import shutil
 from pathlib import Path
 from typing import Dict, Any
 
-from core.paths import get_launcher_dir
+from core.paths import get_data_dir, migrate_user_data
 
-LAUNCHER_CONFIG_PATH = get_launcher_dir() / "config.json"
+# Lives in the shared data folder (see core/paths.USER_DATA_FILES), not
+# next to the exe, so updating or moving the launcher never resets it.
+LAUNCHER_CONFIG_PATH = get_data_dir() / "config.json"
 LAUNCHER_CONFIG_BACKUP_PATH = LAUNCHER_CONFIG_PATH.with_suffix(".json.bak")
 
 # Used if config.json AND its backup are both gone -- lets the app start
@@ -44,7 +46,6 @@ DEFAULT_LAUNCHER_CONFIG: Dict[str, Any] = {
         "come through in ordinary moments too, not just when you're directly "
         "asked about yourself. No emojis or weird symbols, plain text only."
     ),
-    "watch_folder": "",
     "request_filename": "request.txt",
     "response_filename": "response.txt",
     "poll_interval_seconds": 1.0,
@@ -57,7 +58,6 @@ DEFAULT_LAUNCHER_CONFIG: Dict[str, Any] = {
 }
 
 MOD_CONFIG_DEFAULTS = {
-    "ipc_dir": "",
     "chat_prefix": "!pal",
     "gift_command": "!palgift",
     "vision_command": "!palook",
@@ -83,6 +83,7 @@ _MOD_CONFIG_KEY_ORDER = list(MOD_CONFIG_DEFAULTS.keys())
 
 
 def load_launcher_config() -> Dict[str, Any]:
+    migrate_user_data()
     if LAUNCHER_CONFIG_PATH.exists():
         with open(LAUNCHER_CONFIG_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -116,6 +117,32 @@ def save_launcher_config(config: Dict[str, Any]) -> None:
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
     tmp.replace(LAUNCHER_CONFIG_PATH)
+
+
+def get_mod_config_path() -> Path:
+    """config.txt lives in the fixed data folder shared with the Lua mod,
+    not inside the mod folder anymore -- the mod finds it there on its
+    own, so the launcher never needs to know where the game is just to
+    save settings."""
+    return get_data_dir() / "config.txt"
+
+
+def migrate_legacy_mod_config(old_mod_folder: str) -> bool:
+    """Before v1.1 the mod's config.txt lived inside the mod folder
+    itself. If the new one doesn't exist yet, carry the player's old
+    settings over (minus ipc_dir, which no longer exists). Returns True
+    if something was migrated."""
+    new_path = get_mod_config_path()
+    if new_path.exists() or not old_mod_folder:
+        return False
+    old_path = Path(old_mod_folder) / "config.txt"
+    if not old_path.is_file():
+        return False
+    try:
+        save_mod_config(new_path, load_mod_config(old_path))
+    except OSError:
+        return False
+    return True
 
 
 def load_mod_config(mod_config_path: Path) -> Dict[str, str]:

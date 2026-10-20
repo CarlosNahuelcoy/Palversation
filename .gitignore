@@ -28,3 +28,7 @@ Thumbs.db
 
 # Carpeta temporal generada por setup_local_bootloader.bat
 pyinstaller-src/
+
+# Player settings/keys -- now created in %LOCALAPPDATA%\Palversation, never commit one
+config.json
+config.json.bak

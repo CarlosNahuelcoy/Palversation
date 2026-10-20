@@ -1,0 +1,60 @@
+A Palworld mod + launcher that lets your Pals actually talk back, powered by an LLM.
+
+Deploy any Pal, type [b]!pal <message>[/b] in chat, and it replies in character, with its own personality and a growing memory of your past conversations. Runs through Player2 by default, so there's no API key to manage: connect your account once and you're set.
+
+[h1]IMPORTANT: you also need the Palversation launcher[/h1]
+Steam doesn't allow programs on the Workshop, so the launcher (the part that talks to the AI) is a separate download:
+[url=https://github.com/CarlosNahuelcoy/Palversation/releases]Download the Palversation launcher (GitHub Releases)[/url]
+Without it your Pal can't answer. If you forget, your Pal will tell you in the game chat.
+
+[h1]Installation (3 steps)[/h1]
+[olist]
+[*]Subscribe to this item. Steam will also ask you to subscribe to [url=https://steamcommunity.com/workshop/filedetails/?id=3625223587]UE4SS Experimental (Palworld)[/url], which is required. Accept.
+[*]Download the launcher (link above), extract the zip anywhere, and open [b]Palversation.exe[/b].
+[*]Press [b]Connect Account[/b], then [b]Play[/b].
+[/olist]
+That's it. The launcher finds Palworld by itself, and its [b]Setup[/b] tab shows a green check for each part (Palworld, UE4SS, the mod, the AI). Anything red comes with a hint on how to fix it.
+
+Then deploy a Pal and type [b]!pal hello[/b] in the chat. Keep the launcher open while you play (minimized is fine).
+
+[h1]Updating from an older version[/h1]
+[list]
+[*]Download the new launcher and open it. You no longer pick any folders: the old Folders tab is gone.
+[*]Your Pals' memories and settings are now kept in a safe place that survives updates. If you extracted the new version in a different folder than the old one, use [b]Setup > Import old data...[/b] and pick your old launcher folder.
+[*]If the Setup tab says the Workshop copy of the mod is too old, restart Steam so it downloads the update.
+[/list]
+
+[h1]Commands[/h1]
+[list]
+[*][b]!pal <message>[/b]: talk to your deployed Pal.
+[*][b]!palgift[/b]: your Pal may give you a gift.
+[*][b]!palook[/b]: your Pal describes what it sees around it.
+[/list]
+Your Pals also comment on their own: when deployed or recalled, hungry, cold or hot, riding, in combat, and every now and then.
+
+[h1]Features[/h1]
+[list]
+[*]Real-time chat with any deployed Pal.
+[*]Persistent per-Pal memory and personality, so conversations build on each other over time.
+[*]Fully customizable from the launcher: global prompt (including reply language), per-Pal personalities, and which events trigger comments.
+[*]Works with Player2 (free, no key), OpenAI, Gemini, OpenRouter, NovelAI, or a local model.
+[/list]
+
+[h1]Using a local model (Ollama, LM Studio...)[/h1]
+[list]
+[*]In the launcher's General tab, choose [b]Custom (OpenAI-compatible)[/b].
+[*]Base URL: just the server address works, e.g. [b]http://localhost:11434[/b] for Ollama or [b]http://localhost:1234/v1[/b] for LM Studio.
+[*]Model: the exact model name your server uses (e.g. llama3).
+[*]Local models can be slow: raise [b]Response timeout[/b] in the Events tab (e.g. 60 or 90 seconds).
+[/list]
+
+[h1]Troubleshooting[/h1]
+[list]
+[*][b]Windows or my antivirus says it's a virus:[/b] it's a false positive common to unsigned Python programs. The full source code is public on GitHub. On the blue Windows SmartScreen screen, click "More info" > "Run anyway".
+[*][b]My Pal doesn't answer:[/b] open the launcher's Setup tab and fix anything that isn't green, then try [b]Test Full Flow[/b].
+[*][b]The game crashes on startup:[/b] disable Palversation in Palworld's in-game Mods menu and try again. If it still crashes, the problem is UE4SS or another mod. If it stops crashing, please post your UE4SS.log in the comments.
+[/list]
+
+Note: tested only in singleplayer. Multiplayer / dedicated server behavior is unconfirmed. The code is open, so contributions are welcome.
+
+Full source, detailed docs, and the Nexus Mods page: https://github.com/CarlosNahuelcoy/Palversation

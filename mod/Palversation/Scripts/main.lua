@@ -6,8 +6,9 @@
   Version: 0.6.0
 
   New in this step:
-    - config.txt (key=value per line) holds ipc_dir, chat_prefix and
-      gift_command. Only CONFIG_PATH itself stays hardcoded in this file.
+    - config.txt (key=value per line) holds chat_prefix, gift_command and
+      the event settings. Since 0.14.0 it lives in the fixed data folder
+      %LOCALAPPDATA%\Palversation\ (see GetDataDir), not in the mod folder.
     - A separate command (default "!palgift") triggers a "gift_check"
       event, checked before the general chat prefix so a command that
       starts with the same letters (e.g. "!palgift" vs "!pal") is matched
@@ -65,18 +66,17 @@
 local UEHelpers = require("UEHelpers")
 
 local MOD_NAME = "Palversation"
-local VERSION  = "0.13.1"
+local VERSION  = "0.14.0"
 local TAG = "[" .. MOD_NAME .. " v" .. VERSION .. "]"
 
 -- ============================================================================
--- CONFIG FILE - auto-detects the mod's own root folder (one level above
--- Scripts/, where this file lives) using debug.getinfo, a standard Lua
--- feature (not UE4SS-specific). This is NOT confirmed to work inside
--- UE4SS itself (ChickNomad solves this differently, with a list of fixed
--- candidate paths instead), so there's a manual fallback below in case it
--- doesn't resolve correctly on your setup.
+-- DATA FOLDER - fixed location shared with the launcher, so neither side
+-- needs a path configured: %LOCALAPPDATA%\Palversation\. Holds config.txt
+-- (written by the launcher's GUI), the request/response exchange files and
+-- pal_species_names.txt. The launcher creates this folder on startup.
+-- Falls back to the mod's own root folder only if LOCALAPPDATA is somehow
+-- unavailable.
 -- ============================================================================
-local FALLBACK_MOD_ROOT = "D:\\PUT_THE_ABSOLUTE_PATH_TO_YOUR_MOD_FOLDER_HERE"
 
 local function GetModRootDir()
     local ok, info = pcall(function() return debug.getinfo(1, "S") end)
@@ -88,15 +88,27 @@ local function GetModRootDir()
     return source:match("^(.*)[/\\][^/\\]+[/\\][^/\\]+$")
 end
 
-local MOD_ROOT = GetModRootDir()
-if MOD_ROOT then
-    print("[Palversation] Auto-detected mod root: " .. MOD_ROOT)
-else
-    MOD_ROOT = FALLBACK_MOD_ROOT
-    print("[Palversation] Could not auto-detect the mod root, using FALLBACK_MOD_ROOT instead.")
+local function GetDataDir()
+    local base = os.getenv("LOCALAPPDATA")
+    if base and base ~= "" then
+        return base .. "\\Palversation"
+    end
+    return GetModRootDir() or "."
 end
 
-local CONFIG_PATH = MOD_ROOT .. "\\config.txt"
+local DATA_DIR = GetDataDir()
+print(TAG .. " Data folder: " .. DATA_DIR)
+
+local CONFIG_PATH        = DATA_DIR .. "\\config.txt"
+local IPC_DIR            = DATA_DIR .. "\\"
+local REQUEST_PATH       = IPC_DIR .. "request.txt"
+local RESPONSE_PATH      = IPC_DIR .. "response.txt"
+local SPECIES_NAMES_PATH = IPC_DIR .. "pal_species_names.txt"
+local POLL_MS = 500
+-- How often config.txt and pal_species_names.txt are re-read, so changes
+-- made in the launcher (or the launcher being opened after the game)
+-- take effect without restarting Palworld.
+local RELOAD_INTERVAL_SECONDS = 5
 
 local function ToBool(s, default)
     if s == nil then return default end
@@ -106,9 +118,22 @@ local function ToBool(s, default)
     return default
 end
 
+-- Same key=value-per-line format for config.txt and pal_species_names.txt.
+local function ReadKeyValueFile(path, into)
+    local f = io.open(path, "r")
+    if not f then return false end
+    for line in f:lines() do
+        local key, value = line:match("^%s*([%w_]+)%s*=%s*(.-)%s*$")
+        if key and value and value ~= "" then
+            into[key] = value
+        end
+    end
+    f:close()
+    return true
+end
+
 local function LoadConfig()
     local values = {
-        ipc_dir = "",
         chat_prefix = "!pal",
         gift_command = "!palgift",
         vision_command = "!palook",
@@ -129,76 +154,65 @@ local function LoadConfig()
         enable_idle_comments = "true",
         enable_gift_system = "true",
     }
-    local f = io.open(CONFIG_PATH, "r")
-    if not f then
-        print(TAG .. " Could not open config file at " .. CONFIG_PATH .. ", using defaults.")
-        return values
-    end
-    for line in f:lines() do
-        local key, value = line:match("^%s*([%w_]+)%s*=%s*(.-)%s*$")
-        if key and value and value ~= "" then
-            values[key] = value
-        end
-    end
-    f:close()
+    ReadKeyValueFile(CONFIG_PATH, values)
     return values
-end
-
-local CONFIG = LoadConfig()
-
-local IPC_DIR       = CONFIG.ipc_dir
-local REQUEST_PATH  = IPC_DIR .. "request.txt"
-local RESPONSE_PATH = IPC_DIR .. "response.txt"
-local SPECIES_NAMES_PATH = IPC_DIR .. "pal_species_names.txt"
-local PREFIX        = CONFIG.chat_prefix
-local GIFT_PREFIX   = CONFIG.gift_command
-local VISION_PREFIX = CONFIG.vision_command
-local POLL_MS = 500
-
-if IPC_DIR == "" then
-    print(TAG .. " WARNING: 'ipc_dir' is not set in config.txt. File exchange will not work.")
 end
 
 -- Real species display names, e.g. "WoolFox" -> "Cremis". Exported by the
--- launcher into the IPC folder from the user's own pal_data.json (a
--- static, user-compiled reference file -- not read live from the game).
--- Same simple key=value format as config.txt, so no JSON parsing needed
--- here either. Optional: if the launcher hasn't written this file yet
--- (or the user never set up pal_data.json), we just keep using the raw
--- CharacterID as before.
+-- launcher into the data folder from its pal_data.json. Optional: if the
+-- file isn't there yet, we just keep using the raw CharacterID.
 local function LoadSpeciesNames()
     local values = {}
-    local f = io.open(SPECIES_NAMES_PATH, "r")
-    if not f then return values end
-    for line in f:lines() do
-        local key, value = line:match("^%s*([%w_]+)%s*=%s*(.-)%s*$")
-        if key and value and value ~= "" then
-            values[key] = value
-        end
-    end
-    f:close()
+    ReadKeyValueFile(SPECIES_NAMES_PATH, values)
     return values
 end
 
-local SPECIES_NAMES = LoadSpeciesNames()
-do
+-- Every setting below is (re)assigned by ApplySettings(), first right here
+-- at load time and then every RELOAD_INTERVAL_SECONDS from the main loop.
+local PREFIX, GIFT_PREFIX, VISION_PREFIX
+local HUNGER_THRESHOLD
+local ENABLE_DEPLOY_RECALL, ENABLE_HUNGER, ENABLE_TEMPERATURE, ENABLE_RIDE
+local ENABLE_COMBAT, ENABLE_IDLE, ENABLE_GIFTS
+local RESPONSE_TIMEOUT_SECONDS
+local IDLE_MIN_SECONDS, IDLE_MAX_SECONDS
+local AMBIENT_GIFT_MIN_SECONDS, AMBIENT_GIFT_MAX_SECONDS, AMBIENT_GIFT_CHANCE
+local SPECIES_NAMES = {}
+local _speciesCount = -1
+
+local function ApplySettings()
+    local config = LoadConfig()
+    PREFIX        = config.chat_prefix
+    GIFT_PREFIX   = config.gift_command
+    VISION_PREFIX = config.vision_command
+
+    -- Hunger ratio (0-1) below which the Pal is considered "hungry".
+    HUNGER_THRESHOLD = tonumber(config.hunger_threshold) or 0.3
+
+    ENABLE_DEPLOY_RECALL = ToBool(config.enable_deploy_recall_comments, true)
+    ENABLE_HUNGER        = ToBool(config.enable_hunger_comments, true)
+    ENABLE_TEMPERATURE   = ToBool(config.enable_temperature_comments, true)
+    ENABLE_RIDE          = ToBool(config.enable_ride_comments, true)
+    ENABLE_COMBAT        = ToBool(config.enable_combat_comments, true)
+    ENABLE_IDLE          = ToBool(config.enable_idle_comments, true)
+    ENABLE_GIFTS         = ToBool(config.enable_gift_system, true)
+
+    RESPONSE_TIMEOUT_SECONDS = tonumber(config.response_timeout_seconds) or 30
+    IDLE_MIN_SECONDS = tonumber(config.idle_min_seconds) or 300
+    IDLE_MAX_SECONDS = tonumber(config.idle_max_seconds) or 900
+    AMBIENT_GIFT_MIN_SECONDS = tonumber(config.ambient_gift_min_seconds) or 1200
+    AMBIENT_GIFT_MAX_SECONDS = tonumber(config.ambient_gift_max_seconds) or 2400
+    AMBIENT_GIFT_CHANCE = tonumber(config.ambient_gift_chance) or 0.3
+
+    SPECIES_NAMES = LoadSpeciesNames()
     local count = 0
     for _ in pairs(SPECIES_NAMES) do count = count + 1 end
-    print(TAG .. " Loaded " .. count .. " species display names from " .. SPECIES_NAMES_PATH)
+    if count ~= _speciesCount then
+        _speciesCount = count
+        print(TAG .. " Loaded " .. count .. " species display names from " .. SPECIES_NAMES_PATH)
+    end
 end
 
--- Hunger ratio (0-1) below which the Pal is considered "hungry".
-local HUNGER_THRESHOLD = tonumber(CONFIG.hunger_threshold) or 0.3
-
--- Per-feature on/off switches, all editable from config.txt (and later,
--- from the GUI launcher).
-local ENABLE_DEPLOY_RECALL = ToBool(CONFIG.enable_deploy_recall_comments, true)
-local ENABLE_HUNGER        = ToBool(CONFIG.enable_hunger_comments, true)
-local ENABLE_TEMPERATURE   = ToBool(CONFIG.enable_temperature_comments, true)
-local ENABLE_RIDE          = ToBool(CONFIG.enable_ride_comments, true)
-local ENABLE_COMBAT        = ToBool(CONFIG.enable_combat_comments, true)
-local ENABLE_IDLE          = ToBool(CONFIG.enable_idle_comments, true)
-local ENABLE_GIFTS         = ToBool(CONFIG.enable_gift_system, true)
+ApplySettings()
 
 -- ============================================================================
 -- FILE HELPERS
@@ -565,7 +579,23 @@ end
 local _waitingForResponse = false
 local _requestStartedAt = nil
 local _pendingPalName = nil
-local RESPONSE_TIMEOUT_SECONDS = tonumber(CONFIG.response_timeout_seconds) or 30
+
+-- Tells the player in the game chat that the launcher isn't answering,
+-- instead of failing silently. Throttled so spontaneous events can't spam it.
+local LAUNCHER_HINT_COOLDOWN_SECONDS = 120
+-- Workshop subscribers often never see the mod page, where the launcher
+-- link lives (Steam doesn't allow shipping the .exe there).
+local LAUNCHER_DOWNLOAD_URL = "github.com/CarlosNahuelcoy/Palversation/releases"
+local _lastLauncherHintAt = nil
+
+local function ShowLauncherHint(reason)
+    local now = os.clock()
+    if _lastLauncherHintAt and (now - _lastLauncherHintAt) < LAUNCHER_HINT_COOLDOWN_SECONDS then return end
+    _lastLauncherHintAt = now
+    ExecuteInGameThread(function()
+        SendChat("[Palversation] " .. reason .. " Open the Palversation launcher (it can stay minimized while you play). Don't have it? Download it from " .. LAUNCHER_DOWNLOAD_URL)
+    end)
+end
 
 local function TriggerEvent(eventType, palName, palElement, palKey, palPassives, palFriendship, content)
     if _waitingForResponse then
@@ -586,6 +616,8 @@ local function TriggerEvent(eventType, palName, palElement, palKey, palPassives,
         _requestStartedAt = os.clock()
         _pendingPalName = palName
         print(TAG .. " Event '" .. eventType .. "' (" .. palName .. "/" .. palElement .. ") written to " .. REQUEST_PATH)
+    else
+        ShowLauncherHint("Could not reach the launcher (" .. DATA_DIR .. " is missing).")
     end
 end
 
@@ -883,8 +915,6 @@ end
 -- in ChickNomad's own AutoChatter feature.
 -- ============================================================================
 
-local IDLE_MIN_SECONDS = tonumber(CONFIG.idle_min_seconds) or 300
-local IDLE_MAX_SECONDS = tonumber(CONFIG.idle_max_seconds) or 900
 
 local function RandomBetween(minVal, maxVal)
     return minVal + math.random() * (maxVal - minVal)
@@ -909,9 +939,6 @@ end
 -- instead of a predictable clock.
 -- ============================================================================
 
-local AMBIENT_GIFT_MIN_SECONDS = tonumber(CONFIG.ambient_gift_min_seconds) or 1200
-local AMBIENT_GIFT_MAX_SECONDS = tonumber(CONFIG.ambient_gift_max_seconds) or 2400
-local AMBIENT_GIFT_CHANCE = tonumber(CONFIG.ambient_gift_chance) or 0.3
 
 local _nextAmbientGiftAt = os.clock() + RandomBetween(AMBIENT_GIFT_MIN_SECONDS, AMBIENT_GIFT_MAX_SECONDS)
 
@@ -931,7 +958,13 @@ end
 -- ============================================================================
 
 local function RegisterMainLoop()
+    local nextReloadAt = os.clock() + RELOAD_INTERVAL_SECONDS
     LoopAsync(POLL_MS, function()
+        if os.clock() >= nextReloadAt then
+            nextReloadAt = os.clock() + RELOAD_INTERVAL_SECONDS
+            pcall(ApplySettings)
+        end
+
         ExecuteInGameThread(function()
             CheckDeployRecall()
             CheckHunger()
@@ -954,6 +987,8 @@ local function RegisterMainLoop()
             _requestStartedAt = nil
             _pendingPalName = nil
             DeleteFile(RESPONSE_PATH)  -- in case it shows up late, don't send a stale reply later
+            DeleteFile(REQUEST_PATH)   -- nobody picked it up; don't let it fire late either
+            ShowLauncherHint("Your Pal didn't get an answer in time.")
         end
 
         if _waitingForResponse and FileExists(RESPONSE_PATH) then

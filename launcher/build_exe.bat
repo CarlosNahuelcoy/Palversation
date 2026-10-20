@@ -49,6 +49,21 @@ if exist pal_data.json (
 if exist assets (
     set ADD_DATA=%ADD_DATA% --add-data "assets;assets"
 )
+REM The in-game Lua mod ships INSIDE the launcher: on startup (and on
+REM Play) the launcher installs/updates it into the game's UE4SS Mods
+REM folder by itself, so players never download or copy it separately.
+REM Looked up in launcher\mod\ first, then ..\mod\ (the GitHub repo
+REM layout, where mod\ sits next to launcher\).
+set MOD_SRC=
+if exist mod\Palversation\Scripts\main.lua set MOD_SRC=mod
+if not defined MOD_SRC if exist ..\mod\Palversation\Scripts\main.lua set MOD_SRC=..\mod
+if not defined MOD_SRC (
+    echo ERROR: mod\Palversation\Scripts\main.lua not found here or in ..\mod -- the launcher can't install the mod without it.
+    pause
+    exit /b 1
+)
+echo Bundling the in-game mod from %MOD_SRC%
+set ADD_DATA=%ADD_DATA% --add-data "%MOD_SRC%;mod"
 REM Accept any .ico in assets\, not just one named exactly "icon.ico"
 REM (e.g. a hash-named file exported from an icon generator site).
 set ICON_FILE=
@@ -59,10 +74,10 @@ if exist assets\icon.ico (
 )
 if defined ICON_FILE (
     echo Using icon: %ICON_FILE%
-    pyinstaller --name Palversation --onedir --noupx --windowed --clean --icon="%ICON_FILE%" %ADD_DATA% gui\app.py
+    pyinstaller --name Palversation --noconfirm --onedir --noupx --windowed --clean --icon="%ICON_FILE%" %ADD_DATA% gui\app.py
 ) else (
     echo No .ico file found in assets\, building without a custom exe icon.
-    pyinstaller --name Palversation --onedir --noupx --windowed --clean %ADD_DATA% gui\app.py
+    pyinstaller --name Palversation --noconfirm --onedir --noupx --windowed --clean %ADD_DATA% gui\app.py
 )
 echo.
 echo ============================================================
@@ -72,7 +87,7 @@ echo Palversation.exe will not run on its own without the _internal
 echo folder sitting right next to it.
 echo.
 echo config.json, pal_history.json, pal_prompts.json, etc are all
-echo created automatically next to the exe the first time it runs
+echo created automatically in %%LOCALAPPDATA%%\Palversation the first time it runs
 echo -- you don't need to copy anything for those either.
 echo.
 echo Remember: Windows caches .exe icons aggressively. If the exe's

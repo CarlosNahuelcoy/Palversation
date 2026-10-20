@@ -30,15 +30,19 @@ from core.launcher_config import (
     save_launcher_config,
     load_mod_config,
     save_mod_config,
+    get_mod_config_path,
+    migrate_legacy_mod_config,
 )
 from core.pal_prompts import load_prompts, save_prompts
 from core.history_store import load_history
 from core.pal_names import load_names
 from core.pal_memory import load_memories, save_memories
-from core.paths import get_launcher_dir, get_bundled_dir
+from core.paths import get_launcher_dir, get_bundled_dir, get_data_dir
 from core.update_check import CURRENT_VERSION, is_newer_version, fetch_latest_release
-from core.install_check import check_mod_folder, run_full_check, CheckStatus
+from core.install_check import run_setup
+from core.game_locator import PALWORLD_STEAM_URI
 from core.launcher_runtime import get_watch_folder, ConfigError
+from core.logger import log
 from gui import theme
 from gui.watcher_controller import WatcherController
 
@@ -62,6 +66,8 @@ class PalversationApp(tk.Tk):
         self._maybe_set_window_icon()
 
         self.config_data = load_launcher_config()
+        # Pre-1.1 installs kept the mod's config.txt inside the mod folder.
+        migrate_legacy_mod_config(self.config_data.get("mod_folder", ""))
         self.mod_config = load_mod_config(self.mod_config_path())
         self.prompts = load_prompts(self.prompts_path())
         self.history = load_history(self.history_path())
@@ -79,11 +85,17 @@ class PalversationApp(tk.Tk):
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        # Try to start right away; if settings aren't ready yet, this just
-        # leaves the status as "Stopped" instead of popping an error --
-        # the player hasn't necessarily finished configuring things yet.
-        self._try_start_watcher(silent=True)
+        # Find the game and install/update the mod on every launch, then
+        # try to start right away. Nothing pops up here: anything missing
+        # shows in the Setup tab (opened first if the game side isn't ready).
+        self.setup_report = None
         self._poll_log_queue()
+        self.run_setup(show_errors=False)
+        if self.setup_report.game_ready:
+            self.show_tab("general")
+        else:
+            self.show_tab("setup")
+        self._try_start_watcher(silent=True)
         self._poll_watcher_status()
         self._start_update_check()
 
@@ -92,22 +104,19 @@ class PalversationApp(tk.Tk):
     # ------------------------------------------------------------------
 
     def mod_config_path(self) -> Path:
-        mod_folder = self.config_data.get("mod_folder", "")
-        if mod_folder:
-            return Path(mod_folder) / "config.txt"
-        return LAUNCHER_DIR / "config.txt"  # placeholder until a folder is set
+        return get_mod_config_path()
 
     def prompts_path(self) -> Path:
-        return LAUNCHER_DIR / self.config_data.get("prompts_file", "pal_prompts.json")
+        return get_data_dir() / self.config_data.get("prompts_file", "pal_prompts.json")
 
     def history_path(self) -> Path:
-        return LAUNCHER_DIR / self.config_data.get("history_file", "pal_history.json")
+        return get_data_dir() / self.config_data.get("history_file", "pal_history.json")
 
     def names_path(self) -> Path:
-        return LAUNCHER_DIR / self.config_data.get("names_file", "pal_names.json")
+        return get_data_dir() / self.config_data.get("names_file", "pal_names.json")
 
     def memory_path(self) -> Path:
-        return LAUNCHER_DIR / self.config_data.get("memory_file", "pal_memory.json")
+        return get_data_dir() / self.config_data.get("memory_file", "pal_memory.json")
 
     # ------------------------------------------------------------------
     # UI construction
@@ -157,17 +166,15 @@ class PalversationApp(tk.Tk):
         )
         self.start_stop_button.pack(side="left")
 
-        # Lighter-weight action, sits right after Start/Stop -- runs the
-        # static install checks (mod folder + UE4SS) on demand and shows
-        # a plain-language summary, so a player who thinks "it's not
-        # working" has something to try before writing in for support.
-        self.verify_button = tk.Button(
-            status_area, text="Verify Installation", relief="flat", bd=0, cursor="hand2",
-            bg=theme.PANEL_BG_ALT, fg=theme.TEXT, font=theme.FONT_BODY,
-            activebackground=theme.PANEL_BG, activeforeground=theme.TEXT,
-            padx=10, pady=6, command=self._verify_installation,
+        # The one button a player needs: makes sure the mod is installed,
+        # starts the connection and launches Palworld through Steam.
+        self.play_button = tk.Button(
+            status_area, text="▶  Play", relief="flat", bd=0, cursor="hand2",
+            bg="#3aa35f", fg=theme.TEXT_ON_ACCENT, font=(theme.FONT_FAMILY, 10, "bold"),
+            activebackground="#4cc27a", activeforeground=theme.TEXT_ON_ACCENT,
+            padx=16, pady=6, command=self._play,
         )
-        self.verify_button.pack(side="left", padx=(8, 0))
+        self.play_button.pack(side="left", padx=(8, 0))
 
         # Heavier check than Verify Installation: actually round-trips a
         # fake request through the real running watcher and a real
@@ -294,14 +301,14 @@ class PalversationApp(tk.Tk):
         from gui.tab_general import GeneralTab
         from gui.tab_pals import PalsTab
         from gui.tab_events import EventsTab
-        from gui.tab_directories import DirectoriesTab
+        from gui.tab_setup import SetupTab
         from gui.tab_console import ConsoleTab
 
         tab_specs = [
             ("general", "General", GeneralTab),
             ("pals", "Pals", PalsTab),
             ("events", "Events", EventsTab),
-            ("folders", "Folders", DirectoriesTab),
+            ("setup", "Setup", SetupTab),
             ("console", "Console", ConsoleTab),
         ]
 
@@ -316,8 +323,6 @@ class PalversationApp(tk.Tk):
             )
             nav_button.pack(fill="x")
             self._nav_buttons[tab_id] = nav_button
-
-        self.show_tab("general")
 
     def show_tab(self, tab_id: str):
         for tid, frame in self._tabs.items():
@@ -338,45 +343,6 @@ class PalversationApp(tk.Tk):
     # ------------------------------------------------------------------
 
     def _try_start_watcher(self, silent: bool = False):
-        mod_folder_str = self.config_data.get("mod_folder", "").strip()
-        if not mod_folder_str:
-            message = (
-                "The mod folder isn't set yet (or the folder doesn't exist).\n\n"
-                "Go to the Folders tab and point it at your Palversation mod "
-                "installation -- the folder that contains Scripts\\main.lua. "
-                "This is required so the in-game mod knows where to find its "
-                "own settings; without it, the connection can't start."
-            )
-            if not silent:
-                messagebox.showwarning("Palversation - Mod folder missing", message)
-            return message
-
-        # Auto-correct the single most common setup mistake (pointing at
-        # Scripts\ instead of its parent) before even trying to start --
-        # this way a misconfigured folder self-heals the moment the
-        # player picks the wrong one, instead of just silently failing.
-        check_result, corrected_folder = check_mod_folder(Path(mod_folder_str))
-        if corrected_folder is None:
-            message = (
-                f"{check_result.message}\n\n"
-                "Go to the Folders tab and point it at your Palversation mod "
-                "installation -- the folder that contains Scripts\\main.lua."
-            )
-            if not silent:
-                messagebox.showwarning("Palversation - Mod folder missing", message)
-            return message
-
-        if str(corrected_folder) != mod_folder_str:
-            self.config_data["mod_folder"] = str(corrected_folder)
-            save_launcher_config(self.config_data)
-            # If the Folders tab caches the displayed path in its own
-            # widget state, let it know the value changed underneath it.
-            # Safe no-op if that tab doesn't expose this method.
-            folders_tab = self._tabs.get("folders")
-            refresh = getattr(folders_tab, "refresh_from_config", None)
-            if callable(refresh):
-                refresh()
-
         error = self.watcher.start()
         if error and not silent:
             messagebox.showwarning("Palversation", f"Could not start: {error}")
@@ -388,31 +354,40 @@ class PalversationApp(tk.Tk):
         else:
             self._try_start_watcher(silent=False)
 
-    def _verify_installation(self):
-        # On-demand static check: mod folder + UE4SS presence. Doesn't
-        # touch the provider or the watcher -- that's a heavier,
-        # separate end-to-end test.
-        mod_folder_str = self.config_data.get("mod_folder", "").strip()
-        mod_folder = Path(mod_folder_str) if mod_folder_str else None
-        results = run_full_check(mod_folder)
+    def run_setup(self, show_errors: bool = True):
+        """Finds Palworld/UE4SS, installs or updates the bundled mod and
+        refreshes the Setup tab. Returns the SetupReport."""
+        report = run_setup(self.config_data)
+        self.setup_report = report
+        for label, result in report.checks:
+            log(f"[Palversation Launcher] Setup - {label}: {result.message}")
+        setup_tab = self._tabs.get("setup")
+        if setup_tab is not None:
+            setup_tab.show_report(report)
+        problem = report.first_problem()
+        if problem and show_errors:
+            label, result = problem
+            messagebox.showwarning(f"Palversation - {label}", result.message)
+        return report
 
-        lines = []
-        all_ok = True
-        for label, result in results:
-            if result.status == CheckStatus.OK:
-                tag = "[OK]"
-            elif result.status == CheckStatus.MISSING:
-                tag = "[MISSING]"
-                all_ok = False
-            else:
-                tag = "[?]"
-            lines.append(f"{tag} {label}\n{result.message}")
-
-        summary = "\n\n".join(lines)
-        if all_ok:
-            messagebox.showinfo("Palversation - Installation check", summary)
-        else:
-            messagebox.showwarning("Palversation - Installation check", summary)
+    def _play(self):
+        report = self.run_setup(show_errors=False)
+        problem = report.first_problem()
+        if problem:
+            label, result = problem
+            self.show_tab("general" if label == "AI provider" else "setup")
+            messagebox.showwarning(f"Palversation - {label}", result.message)
+            return
+        if self._try_start_watcher(silent=False):
+            return
+        try:
+            os.startfile(PALWORLD_STEAM_URI)
+        except OSError as e:
+            messagebox.showwarning(
+                "Palversation",
+                f"Couldn't launch Palworld through Steam ({e}). Start the game yourself -- "
+                "the launcher is already connected, just keep it open.",
+            )
 
     def _test_full_flow(self):
         # This test needs the watcher actually running -- it writes a
@@ -521,7 +496,7 @@ class PalversationApp(tk.Tk):
                 f"Provider replied:\n\"{payload}\"\n\n"
                 "Note: this only tests the launcher's side. It doesn't "
                 "confirm UE4SS/Lua inside the game itself, that part is "
-                "covered by Verify Installation.",
+                "covered by the Setup tab.",
             )
         elif kind == "timeout":
             messagebox.showwarning(
@@ -529,8 +504,7 @@ class PalversationApp(tk.Tk):
                 "No response after 25 seconds.\n\n"
                 "This means the launcher itself never completed the round "
                 "trip. Check that your provider is configured and reachable "
-                "(try Test Connection in the General tab), and that "
-                "Folders -> Mod Folder points at the right place.",
+                "(try Test Connection in the General tab).",
             )
         else:
             messagebox.showwarning("Palversation - Test failed", payload)
@@ -556,6 +530,17 @@ class PalversationApp(tk.Tk):
     def _on_close(self):
         self.watcher.stop()
         self.destroy()
+
+    def restart_app(self):
+        """Relaunches the launcher, e.g. after importing old data, so every
+        tab reloads from disk instead of each one refreshing itself."""
+        import subprocess
+        if getattr(sys, "frozen", False):
+            args = [sys.executable]
+        else:
+            args = [sys.executable, str(Path(__file__).resolve())]
+        subprocess.Popen(args)
+        self._on_close()
 
     # ------------------------------------------------------------------
     # Update check -- see core/update_check.py for the actual GitHub

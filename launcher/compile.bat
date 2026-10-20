@@ -15,7 +15,13 @@ if not exist "venv\Scripts\activate.bat" (
 
 call venv\Scripts\activate.bat
 
-call build_exe.bat
+call "%~dp0build_exe.bat"
+if errorlevel 1 (
+    echo.
+    echo [compile] Build FAILED, see the output above.
+    pause
+    exit /b 1
+)
 
 echo.
 echo [compile] Done. Check the dist\ folder for Palversation.exe

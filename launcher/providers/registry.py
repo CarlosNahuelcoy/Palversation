@@ -47,13 +47,14 @@ class ProviderSpec:
     requires_api_key: bool = True
 
 
-def _make_player2(api_key: str, base_url: str, system_prompt: str, model_name: str = "") -> LLMProvider:
-    return Player2Provider(api_key=api_key, base_url=base_url, system_prompt=system_prompt)
+def _make_player2(api_key: str, base_url: str, system_prompt: str, model_name: str = "", timeout_seconds: float = 30.0) -> LLMProvider:
+    return Player2Provider(api_key=api_key, base_url=base_url, system_prompt=system_prompt, timeout_seconds=timeout_seconds)
 
 
-def _make_openai_compatible(api_key: str, base_url: str, system_prompt: str, model_name: str = "") -> LLMProvider:
+def _make_openai_compatible(api_key: str, base_url: str, system_prompt: str, model_name: str = "", timeout_seconds: float = 30.0) -> LLMProvider:
     return OpenAICompatibleProvider(
-        api_key=api_key, base_url=base_url, system_prompt=system_prompt, model_name=model_name
+        api_key=api_key, base_url=base_url, system_prompt=system_prompt, model_name=model_name,
+        timeout_seconds=timeout_seconds,
     )
 
 
@@ -62,12 +63,14 @@ def _make_novelai(
     base_url: str,
     system_prompt: str,
     model_name: str = "",
+    timeout_seconds: float = 90.0,
 ) -> LLMProvider:
     return NovelAIProvider(
         api_key=api_key,
         base_url=base_url,
         system_prompt=system_prompt,
         model_name=model_name or "glm-4-6",
+        timeout_seconds=timeout_seconds,
     )
 
 

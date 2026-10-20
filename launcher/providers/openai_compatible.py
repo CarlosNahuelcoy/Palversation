@@ -11,12 +11,36 @@ above require it (Player2 chooses a model automatically instead, which
 is why it stays a separate, simpler class).
 """
 
+import re
 import requests
 from typing import List, Dict, Optional
+from urllib.parse import urlsplit
 
 from .base import LLMProvider
 from core.text_clean import strip_emojis
 from core.event_prompts import build_user_message, build_system_prompt
+
+
+_VERSION_SEGMENT_RE = re.compile(r"/v\d+[a-z0-9]*$")
+
+
+def normalize_chat_completions_url(url: str) -> str:
+    """Completes a partial base URL into the full /chat/completions
+    endpoint, so pasting just "http://localhost:11434" (Ollama) or
+    ".../v1" (LM Studio, most local servers) works instead of failing
+    with a confusing 404/405. Full URLs are left untouched."""
+    url = (url or "").strip().rstrip("/")
+    if not url or url.endswith("/chat/completions"):
+        return url
+    path = urlsplit(url).path
+    if url.endswith("/completions"):
+        # Legacy /v1/completions endpoint: same server, wrong route.
+        return url[: -len("/completions")] + "/chat/completions"
+    if _VERSION_SEGMENT_RE.search(url) or url.endswith("/openai"):
+        return url + "/chat/completions"
+    if path in ("", "/"):
+        return url + "/v1/chat/completions"
+    return url + "/chat/completions"
 
 
 class OpenAICompatibleProvider(LLMProvider):
@@ -29,7 +53,7 @@ class OpenAICompatibleProvider(LLMProvider):
         timeout_seconds: float = 30.0,
     ):
         self.api_key = api_key
-        self.base_url = base_url
+        self.base_url = normalize_chat_completions_url(base_url)
         self.system_prompt = system_prompt
         self.model_name = model_name
         self.timeout_seconds = timeout_seconds

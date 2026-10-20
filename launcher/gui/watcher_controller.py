@@ -21,7 +21,9 @@ class WatcherController:
         self._thread = None
         self._stop_event = None
         self.log_queue = queue.Queue()
-        self._sink_registered = False
+        # Registered right away (not on first start) so setup messages
+        # logged before the watcher runs also reach the Console tab.
+        add_sink(self.log_queue.put)
 
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
@@ -40,10 +42,6 @@ class WatcherController:
             return str(e)
 
         history_path, prompts_path, names_path, pal_data_path, memory_path = get_data_paths(config)
-
-        if not self._sink_registered:
-            add_sink(self.log_queue.put)
-            self._sink_registered = True
 
         self._stop_event = threading.Event()
         self._thread = threading.Thread(
