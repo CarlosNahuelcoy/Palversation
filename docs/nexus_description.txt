@@ -1,0 +1,60 @@
+A Palworld mod + launcher that lets your Pals actually talk back, powered by an LLM.
+
+Deploy any Pal, type "!pal <message>" in chat, and it replies in character, with its own personality and a growing memory of your past conversations. Runs through Player2 by default, so there's no API key to manage: connect your account once and you're set.
+
+[size=5][b][color=#e6a817]IMPORTANT: download the launcher from GitHub[/color][/b][/size]
+Your Pals' replies come from the [b]Palversation launcher[/b], a small program that has to be open while you play. Nexus doesn't allow programs here, so get it from GitHub:
+
+[size=4][b][url=https://github.com/CarlosNahuelcoy/Palversation/releases]>> Download the Palversation launcher (GitHub Releases) <<[/url][/b][/size]
+
+The launcher finds Palworld and installs the mod by itself, so [b]the file on this page is optional[/b]: it's only for people who prefer installing the mod by hand. If you forget the launcher, your Pal will remind you in the game chat.
+
+Note: tested only in singleplayer. Multiplayer / dedicated server behavior is unconfirmed. The code is open, so contributions are welcome.
+
+[size=5][b]Installation[/b][/size]
+[list=1]
+[*]Install [url=https://steamcommunity.com/workshop/filedetails/?id=3625223587]UE4SS Experimental (Palworld)[/url] if you don't already have it. It's required for the mod to load.
+[*]Download the launcher (link above), extract the zip anywhere [b]outside[/b] the Palworld folder and open [b]Palversation.exe[/b]. It finds Palworld and installs the mod for you: no folders to pick.
+[*]Press [b]Connect Account[/b], then [b]Play[/b].
+[*]In-game, deploy a Pal and type "!pal <message>" to start talking.
+[/list]
+The launcher's [b]Setup[/b] tab shows a green check for each part (Palworld, UE4SS, the mod, the AI). Anything red comes with a hint on how to fix it. Keep the launcher open while you play (minimized is fine).
+
+[b]Installing the file from this page by hand (optional):[/b] copy the [i]Palversation[/i] folder into [i]...\steamapps\common\Palworld\Mods\NativeMods\UE4SS\Mods\[/i]. It's already enabled, no need to edit mods.txt. You still need the launcher.
+
+[size=5][b]Updating from an older version[/b][/size]
+[list]
+[*]Download the new launcher and open it. It updates the mod for you, and the old Folders tab is gone: nothing to set up again.
+[*]Your Pals' memories and settings now live in a folder that survives updates. If you extracted the new version somewhere other than the old one, use [b]Setup > Import old data...[/b] and pick your old launcher folder.
+[/list]
+
+[size=5][b]Main features[/b][/size]
+[list]
+[*]Real-time chat with any deployed Pal through "!pal <message>".
+[*]"!palgift" lets a Pal give you a gift.
+[*]"!palook" makes a Pal describe what it sees around it.
+[*]Persistent per-Pal memory and personality, so conversations build on each other over time.
+[*]Pals react on their own: when you deploy or recall them, when they get knocked out and come back, when they level up, when they trust you more, when they're hungry, cold or hot, while riding, in combat, and every now and then.
+[*]Aware of the moment: day or night, how hurt they are and how strong they've become shape what they say.
+[*]Your messages are never lost: if you type while your Pal is still answering, it's sent right after.
+[*]Fully customizable through the launcher: global prompt (including reply language), per-Pal personalities, and which events trigger comments.
+[*]Works with Player2 (free, no key), OpenAI, Gemini, OpenRouter, NovelAI, or a local model.
+[/list]
+
+[size=5][b]Using a local model (Ollama, LM Studio...)[/b][/size]
+[list]
+[*]In the launcher's General tab, choose [b]Custom (OpenAI-compatible)[/b].
+[*]Base URL: the server address alone works, e.g. [b]http://localhost:11434[/b] for Ollama or [b]http://localhost:1234/v1[/b] for LM Studio.
+[*]Model: the exact model name your server uses (e.g. llama3).
+[*]Local models can be slow: raise [b]Response timeout[/b] in the Events tab (e.g. 60 or 90 seconds).
+[/list]
+
+[size=5][b]Troubleshooting[/b][/size]
+[list]
+[*][b]Windows or my antivirus says the launcher is a virus:[/b] it's a false positive common to unsigned Python programs. The full source code is public on GitHub. On the blue SmartScreen screen, click "More info" > "Run anyway".
+[*][b]My Pal doesn't answer:[/b] open the launcher's Setup tab and fix anything that isn't green, then try [b]Test Full Flow[/b].
+[*][b]The game crashes on startup:[/b] disable Palversation and try again. If it still crashes, the problem is UE4SS or another mod. If it stops crashing, please post your UE4SS.log in the comments.
+[/list]
+
+Full source and detailed docs: [url=https://github.com/CarlosNahuelcoy/Palversation]github.com/CarlosNahuelcoy/Palversation[/url]
+Also on the Steam Workshop: [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3785893955]Palversation[/url]
